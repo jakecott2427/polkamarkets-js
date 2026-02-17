@@ -23,9 +23,6 @@ contract DeployCLOB is Script {
     address collateral = vm.envAddress("COLLATERAL");
     address realitio = vm.envOr("REALITIO_ERC20", address(0));
     address adminRegistryAddr = vm.envOr("ADMIN_REGISTRY", address(0));
-    address treasury = vm.envOr("TREASURY", admin);
-    address distributor = vm.envOr("DISTRIBUTOR", admin);
-    address network = vm.envOr("NETWORK", admin);
     address operator = vm.envOr("OPERATOR", admin);
 
     bool deployRegistry = adminRegistryAddr == address(0);
@@ -70,9 +67,6 @@ contract DeployCLOB is Script {
     registry.grantRole(registry.FEE_ADMIN_ROLE(), admin);
     registry.grantRole(registry.OPERATOR_ROLE(), operator);
     registry.grantRole(registry.RESOLUTION_ADMIN_ROLE(), admin);
-
-    feeModule.setFeeRecipients(treasury, distributor, network);
-    feeModule.setFeeSplit(5000, 3000, 2000);
 
     vm.stopBroadcast();
 

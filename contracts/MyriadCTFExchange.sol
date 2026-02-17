@@ -12,6 +12,7 @@ import "./IMyriadMarketManager.sol";
 
 /// @title MyriadCTFExchange
 /// @notice On-chain settlement engine for matched signed orders with partial fill support.
+///         Fees are collected as a single total and forwarded to the FeeModule for accrual.
 contract MyriadCTFExchange is ReentrancyGuard, ERC1155Holder, EIP712 {
   using SafeERC20 for IERC20;
 
@@ -34,15 +35,6 @@ contract MyriadCTFExchange is ReentrancyGuard, ERC1155Holder, EIP712 {
   struct FeeConfig {
     uint256 makerFeeBps;
     uint256 takerFeeBps;
-    uint256 treasuryBps;
-    uint256 distributorBps;
-    uint256 networkBps;
-  }
-
-  struct FeeRecipients {
-    address treasury;
-    address distributor;
-    address network;
   }
 
   bytes32 private constant ORDER_TYPEHASH =
@@ -85,6 +77,7 @@ contract MyriadCTFExchange is ReentrancyGuard, ERC1155Holder, EIP712 {
       Order calldata order = orders[i];
       require(order.trader == msg.sender, "not trader");
       bytes32 orderHash = hashOrder(order);
+      require(!orderInvalidated[orderHash], "already cancelled");
       orderInvalidated[orderHash] = true;
       emit OrderCancelled(orderHash, msg.sender);
     }
@@ -92,15 +85,15 @@ contract MyriadCTFExchange is ReentrancyGuard, ERC1155Holder, EIP712 {
 
   /// @notice Match two signed orders, filling `fillAmount` shares.
   /// @param fillAmount How many shares to settle in this match (partial fill).
+  /// @return totalFees The total protocol fees collected (sent to feeModule).
   function matchOrders(
     Order calldata maker,
     bytes calldata makerSig,
     Order calldata taker,
     bytes calldata takerSig,
     uint256 fillAmount,
-    FeeConfig calldata feeConfig,
-    FeeRecipients calldata recipients
-  ) external onlyFeeModule nonReentrant {
+    FeeConfig calldata feeConfig
+  ) external onlyFeeModule nonReentrant returns (uint256 totalFees) {
     _validateFeeConfig(feeConfig);
     _validateOrder(maker, makerSig);
     _validateOrder(taker, takerSig);
@@ -121,11 +114,11 @@ contract MyriadCTFExchange is ReentrancyGuard, ERC1155Holder, EIP712 {
     filledAmounts[takerHash] += fillAmount;
 
     if (maker.side != taker.side) {
-      _settleDirectMatch(maker, taker, fillAmount, feeConfig, recipients);
+      totalFees = _settleDirectMatch(maker, taker, fillAmount, feeConfig);
     } else if (maker.side == Side.Buy) {
-      _settleMintMatch(maker, taker, fillAmount, feeConfig, recipients);
+      totalFees = _settleMintMatch(maker, taker, fillAmount, feeConfig);
     } else {
-      _settleMergeMatch(maker, taker, fillAmount, feeConfig, recipients);
+      totalFees = _settleMergeMatch(maker, taker, fillAmount, feeConfig);
     }
 
     emit OrdersMatched(makerHash, takerHash, maker.marketId, fillAmount);
@@ -165,16 +158,14 @@ contract MyriadCTFExchange is ReentrancyGuard, ERC1155Holder, EIP712 {
   function _validateFeeConfig(FeeConfig calldata feeConfig) internal pure {
     require(feeConfig.makerFeeBps <= BPS, "maker fee");
     require(feeConfig.takerFeeBps <= BPS, "taker fee");
-    require(feeConfig.treasuryBps + feeConfig.distributorBps + feeConfig.networkBps == BPS, "split");
   }
 
   function _settleDirectMatch(
     Order calldata maker,
     Order calldata taker,
     uint256 fillAmount,
-    FeeConfig calldata feeConfig,
-    FeeRecipients calldata recipients
-  ) internal {
+    FeeConfig calldata feeConfig
+  ) internal returns (uint256 totalProtocolFees) {
     require(maker.outcome == taker.outcome, "outcome mismatch");
 
     if (maker.side == Side.Buy) {
@@ -193,9 +184,7 @@ contract MyriadCTFExchange is ReentrancyGuard, ERC1155Holder, EIP712 {
     IERC20 collateral = manager.getMarketCollateral(maker.marketId);
     uint256 makerFee = (notional * feeConfig.makerFeeBps) / BPS;
     uint256 takerFee = (notional * feeConfig.takerFeeBps) / BPS;
-    uint256 totalProtocolFees = makerFee + takerFee;
-
-    (uint256 treasuryFee, uint256 distributorFee, uint256 networkFee) = _splitFees(totalProtocolFees, feeConfig);
+    totalProtocolFees = makerFee + takerFee;
 
     address buyer = maker.side == Side.Buy ? maker.trader : taker.trader;
     address seller = maker.side == Side.Sell ? maker.trader : taker.trader;
@@ -221,16 +210,18 @@ contract MyriadCTFExchange is ReentrancyGuard, ERC1155Holder, EIP712 {
     uint256 sellerProceeds = notional - sellerFee;
     collateral.safeTransfer(seller, sellerProceeds);
 
-    _distributeFees(collateral, recipients, treasuryFee, distributorFee, networkFee);
+    // Send total fees to feeModule for accrual
+    if (totalProtocolFees > 0) {
+      collateral.safeTransfer(feeModule, totalProtocolFees);
+    }
   }
 
   function _settleMintMatch(
     Order calldata maker,
     Order calldata taker,
     uint256 fillAmount,
-    FeeConfig calldata feeConfig,
-    FeeRecipients calldata recipients
-  ) internal {
+    FeeConfig calldata feeConfig
+  ) internal returns (uint256 totalProtocolFees) {
     require(maker.side == Side.Buy && taker.side == Side.Buy, "side mismatch");
     require(maker.outcome != taker.outcome, "same outcome");
     _requireMarketOpen(maker.marketId);
@@ -241,23 +232,22 @@ contract MyriadCTFExchange is ReentrancyGuard, ERC1155Holder, EIP712 {
     IERC20 collateral = manager.getMarketCollateral(maker.marketId);
 
     uint256 yesNotional = (fillAmount * yesOrder.price) / ONE;
-    uint256 noNotional = (fillAmount * noOrder.price) / ONE;
+    uint256 noNotional = fillAmount - yesNotional; // derive to avoid 1-wei dust
 
     collateral.safeTransferFrom(yesOrder.trader, address(conditionalTokens), yesNotional);
     collateral.safeTransferFrom(noOrder.trader, address(conditionalTokens), noNotional);
 
     conditionalTokens.mintPositionsTo(yesOrder.trader, noOrder.trader, maker.marketId, fillAmount);
 
-    _applyFees(maker, taker, fillAmount, feeConfig, recipients, collateral);
+    totalProtocolFees = _collectFees(maker, taker, fillAmount, feeConfig, collateral);
   }
 
   function _settleMergeMatch(
     Order calldata maker,
     Order calldata taker,
     uint256 fillAmount,
-    FeeConfig calldata feeConfig,
-    FeeRecipients calldata recipients
-  ) internal {
+    FeeConfig calldata feeConfig
+  ) internal returns (uint256 totalProtocolFees) {
     require(maker.side == Side.Sell && taker.side == Side.Sell, "side mismatch");
     require(maker.outcome != taker.outcome, "same outcome");
     _requireMarketOpen(maker.marketId);
@@ -276,29 +266,26 @@ contract MyriadCTFExchange is ReentrancyGuard, ERC1155Holder, EIP712 {
     IERC20 collateral = manager.getMarketCollateral(maker.marketId);
 
     uint256 yesNotional = (fillAmount * yesOrder.price) / ONE;
-    uint256 noNotional = (fillAmount * noOrder.price) / ONE;
+    uint256 noNotional = fillAmount - yesNotional; // derive to avoid 1-wei dust
 
-    _paySellerWithFees(maker, taker, fillAmount, feeConfig, recipients, collateral, yesOrder, noOrder, yesNotional, noNotional);
+    totalProtocolFees = _paySellerWithFees(maker, taker, fillAmount, feeConfig, collateral, yesOrder, noOrder, yesNotional, noNotional);
   }
 
   /// @dev Flat fee collection for mint matches (both sides are buyers).
   ///      Each participant pays their own fee (maker pays makerFee, taker pays takerFee).
-  function _applyFees(
+  function _collectFees(
     Order calldata maker,
     Order calldata taker,
     uint256 fillAmount,
     FeeConfig calldata feeConfig,
-    FeeRecipients calldata recipients,
     IERC20 collateral
-  ) internal {
+  ) internal returns (uint256 totalProtocolFees) {
     uint256 makerNotional = (fillAmount * maker.price) / ONE;
-    uint256 takerNotional = (fillAmount * taker.price) / ONE;
+    uint256 takerNotional = fillAmount - makerNotional; // derive to avoid dust
 
     uint256 makerFee = (makerNotional * feeConfig.makerFeeBps) / BPS;
     uint256 takerFee = (takerNotional * feeConfig.takerFeeBps) / BPS;
-    uint256 totalProtocolFees = makerFee + takerFee;
-
-    (uint256 treasuryFee, uint256 distributorFee, uint256 networkFee) = _splitFees(totalProtocolFees, feeConfig);
+    totalProtocolFees = makerFee + takerFee;
 
     if (makerFee > 0) {
       collateral.safeTransferFrom(maker.trader, address(this), makerFee);
@@ -306,31 +293,32 @@ contract MyriadCTFExchange is ReentrancyGuard, ERC1155Holder, EIP712 {
     if (takerFee > 0) {
       collateral.safeTransferFrom(taker.trader, address(this), takerFee);
     }
-    _distributeFees(collateral, recipients, treasuryFee, distributorFee, networkFee);
+
+    // Send total fees to feeModule for accrual
+    if (totalProtocolFees > 0) {
+      collateral.safeTransfer(feeModule, totalProtocolFees);
+    }
   }
 
   /// @dev Flat fee deduction for merge matches (both sides are sellers).
-  ///      Each participant's fee is deducted from their own USDC proceeds.
+  ///      Each participant's fee is deducted from their own collateral proceeds.
   function _paySellerWithFees(
     Order calldata maker,
     Order calldata taker,
     uint256 fillAmount,
     FeeConfig calldata feeConfig,
-    FeeRecipients calldata recipients,
     IERC20 collateral,
     Order calldata yesOrder,
     Order calldata noOrder,
     uint256 yesNotional,
     uint256 noNotional
-  ) internal {
+  ) internal returns (uint256 totalProtocolFees) {
     uint256 makerNotional = (fillAmount * maker.price) / ONE;
-    uint256 takerNotional = (fillAmount * taker.price) / ONE;
+    uint256 takerNotional = fillAmount - makerNotional; // derive to avoid dust
 
     uint256 makerFee = (makerNotional * feeConfig.makerFeeBps) / BPS;
     uint256 takerFee = (takerNotional * feeConfig.takerFeeBps) / BPS;
-    uint256 totalProtocolFees = makerFee + takerFee;
-
-    (uint256 treasuryFee, uint256 distributorFee, uint256 networkFee) = _splitFees(totalProtocolFees, feeConfig);
+    totalProtocolFees = makerFee + takerFee;
 
     address makerTrader = maker.trader;
     address takerTrader = taker.trader;
@@ -348,38 +336,9 @@ contract MyriadCTFExchange is ReentrancyGuard, ERC1155Holder, EIP712 {
     collateral.safeTransfer(yesOrder.trader, makerTrader == yesOrder.trader ? makerProceeds : takerProceeds);
     collateral.safeTransfer(noOrder.trader, makerTrader == noOrder.trader ? makerProceeds : takerProceeds);
 
-    _distributeFees(collateral, recipients, treasuryFee, distributorFee, networkFee);
-  }
-
-  function _splitFees(uint256 totalFee, FeeConfig calldata feeConfig)
-    internal
-    pure
-    returns (
-      uint256 treasuryFee,
-      uint256 distributorFee,
-      uint256 networkFee
-    )
-  {
-    treasuryFee = (totalFee * feeConfig.treasuryBps) / BPS;
-    distributorFee = (totalFee * feeConfig.distributorBps) / BPS;
-    networkFee = totalFee - treasuryFee - distributorFee;
-  }
-
-  function _distributeFees(
-    IERC20 collateral,
-    FeeRecipients calldata recipients,
-    uint256 treasuryFee,
-    uint256 distributorFee,
-    uint256 networkFee
-  ) internal {
-    if (treasuryFee > 0) {
-      collateral.safeTransfer(recipients.treasury, treasuryFee);
-    }
-    if (distributorFee > 0) {
-      collateral.safeTransfer(recipients.distributor, distributorFee);
-    }
-    if (networkFee > 0) {
-      collateral.safeTransfer(recipients.network, networkFee);
+    // Send total fees to feeModule for accrual
+    if (totalProtocolFees > 0) {
+      collateral.safeTransfer(feeModule, totalProtocolFees);
     }
   }
 

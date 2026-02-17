@@ -55,7 +55,7 @@ contract PredictionMarketV3ManagerCLOB is ReentrancyGuard, IMyriadMarketManager 
   IRealityETH_ERC20 public immutable realitio;
   IERC20 public immutable collateralToken;
 
-  uint256 public marketIndex;
+  uint256 public marketIndex = 1;
   mapping(uint256 => Market) public markets;
 
   event MarketCreated(
@@ -129,6 +129,7 @@ contract PredictionMarketV3ManagerCLOB is ReentrancyGuard, IMyriadMarketManager 
 
   function adminResolveMarket(uint256 marketId, int256 outcomeId) external nonReentrant returns (int256) {
     require(registry.hasRole(registry.RESOLUTION_ADMIN_ROLE(), msg.sender), "not resolution admin");
+    require(outcomeId == 0 || outcomeId == 1 || outcomeId == -1, "invalid outcome");
 
     Market storage market = markets[marketId];
     require(market.id == marketId, "!m");
