@@ -98,6 +98,7 @@ contract MyriadCTFExchange is ReentrancyGuard, ERC1155Holder, EIP712 {
     _validateOrder(maker, makerSig);
     _validateOrder(taker, takerSig);
 
+    require(maker.trader != taker.trader, "self trade");
     require(maker.marketId == taker.marketId, "market mismatch");
     require(maker.outcome < 2 && taker.outcome < 2, "bad outcome");
     require(maker.price > 0 && taker.price > 0, "bad price");

@@ -743,7 +743,7 @@ contract PredictionMarketCLOBTest is Test {
   // =========================================================================
 
   function testSelfTradeReverts() public {
-    // Same trader on both sides of a direct match
+    // Same trader on both sides of a direct match — must revert
     uint256 amount = 10 ether;
     uint256 price = (50 * ONE) / 100;
 
@@ -778,14 +778,8 @@ contract PredictionMarketCLOBTest is Test {
     bytes memory buySig = _signOrder(buyOrder, makerPk);
     bytes memory sellSig = _signOrder(sellOrder, makerPk);
 
-    // This actually works on-chain — same trader buys their own shares back.
-    // It's economically wasteful (paying fees for nothing) but not invalid.
-    // If we want to block it, we'd need an explicit check.
+    vm.expectRevert("self trade");
     feeModule.matchOrdersWithFees(buyOrder, buySig, sellOrder, sellSig, amount);
-
-    // Maker still has the same shares (bought back what they sold)
-    uint256 yesId = conditionalTokens.getTokenId(marketId, 0);
-    assertEq(conditionalTokens.balanceOf(maker, yesId), amount);
   }
 
   function testExpiredOrderReverts() public {
