@@ -84,15 +84,12 @@ contract FeeModule {
     require(registry.hasRole(registry.OPERATOR_ROLE(), msg.sender), "not operator");
     require(maker.marketId == taker.marketId, "market mismatch");
 
-    // Determine which price index to use for each side's fee lookup
     uint256 makerIdx = _priceIndex(maker.price);
     uint256 takerIdx;
 
     if (maker.side != taker.side) {
-      // Direct match (BUY vs SELL): both fees at the execution price (maker's price)
       takerIdx = makerIdx;
     } else {
-      // Mint or merge: each side's fee is looked up at their own price
       takerIdx = _priceIndex(taker.price);
     }
 

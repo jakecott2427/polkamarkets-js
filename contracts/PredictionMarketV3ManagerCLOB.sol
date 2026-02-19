@@ -49,6 +49,7 @@ contract PredictionMarketV3ManagerCLOB is ReentrancyGuard, IMyriadMarketManager 
     address feeModule;
   }
 
+  uint256 private constant ONE = 1e18;
   uint256 public constant MINIMUM_REALITIO_TIMEOUT = 3600;
 
   AdminRegistry public immutable registry;
@@ -57,6 +58,7 @@ contract PredictionMarketV3ManagerCLOB is ReentrancyGuard, IMyriadMarketManager 
 
   uint256 public marketIndex = 1;
   mapping(uint256 => Market) public markets;
+  mapping(uint256 => uint256[2]) public voidedPayouts; // [yesPayout, noPayout] in 1e18
 
   event MarketCreated(
     address indexed user,
@@ -129,7 +131,7 @@ contract PredictionMarketV3ManagerCLOB is ReentrancyGuard, IMyriadMarketManager 
 
   function adminResolveMarket(uint256 marketId, int256 outcomeId) external nonReentrant returns (int256) {
     require(registry.hasRole(registry.RESOLUTION_ADMIN_ROLE(), msg.sender), "not resolution admin");
-    require(outcomeId == 0 || outcomeId == 1 || outcomeId == -1, "invalid outcome");
+    require(outcomeId == 0 || outcomeId == 1, "invalid outcome");
 
     Market storage market = markets[marketId];
     require(market.id == marketId, "!m");
@@ -141,6 +143,31 @@ contract PredictionMarketV3ManagerCLOB is ReentrancyGuard, IMyriadMarketManager 
     emit MarketResolved(msg.sender, marketId, outcomeId, block.timestamp);
 
     return outcomeId;
+  }
+
+  /// @notice Void a market with custom payout ratios for each outcome token.
+  /// @param yesPayout Collateral returned per YES token (1e18 = 100%).
+  /// @param noPayout  Collateral returned per NO  token (1e18 = 100%).
+  /// @dev yesPayout + noPayout MUST equal 1e18 (100%).
+  function adminVoidMarket(
+    uint256 marketId,
+    uint256 yesPayout,
+    uint256 noPayout
+  ) external nonReentrant returns (int256) {
+    require(registry.hasRole(registry.RESOLUTION_ADMIN_ROLE(), msg.sender), "not resolution admin");
+    require(yesPayout + noPayout == ONE, "payouts must sum to 1e18");
+
+    Market storage market = markets[marketId];
+    require(market.id == marketId, "!m");
+    require(market.state != MarketState.resolved, "resolved");
+
+    market.resolvedOutcome = -1;
+    market.state = MarketState.resolved;
+    voidedPayouts[marketId] = [yesPayout, noPayout];
+
+    emit MarketResolved(msg.sender, marketId, -1, block.timestamp);
+
+    return -1;
   }
 
   function pauseMarket(uint256 marketId, bool paused) external nonReentrant {
@@ -230,6 +257,15 @@ contract PredictionMarketV3ManagerCLOB is ReentrancyGuard, IMyriadMarketManager 
     require(market.id == marketId, "!m");
 
     return uint8(market.executionMode);
+  }
+
+  function getVoidedPayouts(uint256 marketId) external view override returns (uint256 yesPayout, uint256 noPayout) {
+    Market storage market = markets[marketId];
+    require(market.id == marketId, "!m");
+    require(market.resolvedOutcome == -1, "not voided");
+
+    yesPayout = voidedPayouts[marketId][0];
+    noPayout = voidedPayouts[marketId][1];
   }
 
   function _getTokenId(uint256 marketId, uint256 outcome) internal pure returns (uint256) {

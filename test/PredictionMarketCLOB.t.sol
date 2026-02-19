@@ -170,19 +170,17 @@ contract PredictionMarketCLOBTest is Test {
     assertEq(conditionalTokens.balanceOf(taker, noId), amount);
 
     uint256 makerNotional = (amount * priceYes) / ONE;
-    uint256 takerNotional = amount - makerNotional; // derived (dust-free)
+    uint256 takerNotional = amount - makerNotional;
     uint256 makerFee = (makerNotional * 100) / BPS;
     uint256 takerFee = (takerNotional * 200) / BPS;
     uint256 totalProtocolFees = makerFee + takerFee;
 
-    // Flat fees: each participant pays their own fee (no rebates)
     uint256 expectedMaker = makerBefore - makerNotional - makerFee;
     uint256 expectedTaker = takerBefore - takerNotional - takerFee;
 
     assertEq(collateral.balanceOf(maker), expectedMaker);
     assertEq(collateral.balanceOf(taker), expectedTaker);
 
-    // Fees are held as a total in FeeModule — no split, just accrued
     assertEq(feeModule.accruedFees(address(collateral)), totalProtocolFees);
     assertEq(collateral.balanceOf(address(feeModule)), totalProtocolFees);
   }
@@ -240,9 +238,7 @@ contract PredictionMarketCLOBTest is Test {
     uint256 makerFee = (notional * 100) / BPS;
     uint256 takerFee = (notional * 200) / BPS;
 
-    // Maker (seller) receives notional minus their own fee
     assertEq(collateral.balanceOf(maker), makerBefore + notional - makerFee);
-    // Taker (buyer) pays notional plus their own fee
     assertEq(collateral.balanceOf(taker), takerBefore - notional - takerFee);
   }
 
@@ -297,11 +293,10 @@ contract PredictionMarketCLOBTest is Test {
     feeModule.matchOrdersWithFees(makerOrder, makerSig, takerOrder, takerSig, amount);
 
     uint256 yesNotional = (amount * priceYes) / ONE;
-    uint256 noNotional = amount - yesNotional; // derived (dust-free)
+    uint256 noNotional = amount - yesNotional;
     uint256 makerFee = (yesNotional * 100) / BPS;
     uint256 takerFee = (noNotional * 200) / BPS;
 
-    // Merge match: each seller's fee deducted from their own USDC proceeds
     assertEq(collateral.balanceOf(sellerYes), yesBefore + yesNotional - makerFee);
     assertEq(collateral.balanceOf(sellerNo), noBefore + noNotional - takerFee);
   }
@@ -360,22 +355,17 @@ contract PredictionMarketCLOBTest is Test {
     uint256 yesId = conditionalTokens.getTokenId(marketId, 0);
     uint256 noId = conditionalTokens.getTokenId(marketId, 1);
 
-    // Each side receives fillAmount shares of their outcome
     assertEq(conditionalTokens.balanceOf(maker, yesId), fillAmount);
     assertEq(conditionalTokens.balanceOf(taker, noId), fillAmount);
 
-    // Check filledAmounts on-chain
     bytes32 makerHash = exchange.hashOrder(makerOrder);
     bytes32 takerHash = exchange.hashOrder(takerOrder);
     assertEq(exchange.filledAmounts(makerHash), fillAmount);
     assertEq(exchange.filledAmounts(takerHash), fillAmount);
 
-    // Maker is NOT invalidated — can still be filled more
     assertFalse(exchange.orderInvalidated(makerHash));
-    // Taker is fully filled but also not invalidated (just can't fill more due to filledAmounts check)
     assertFalse(exchange.orderInvalidated(takerHash));
 
-    // Collateral checks: each side paid fillAmount * price + fee
     uint256 makerNotional = (fillAmount * priceYes) / ONE;
     uint256 takerNotional = fillAmount - makerNotional;
     uint256 makerFee = (makerNotional * 100) / BPS;
@@ -551,17 +541,13 @@ contract PredictionMarketCLOBTest is Test {
     uint256 yesId = conditionalTokens.getTokenId(marketId, 0);
     assertEq(conditionalTokens.balanceOf(taker, yesId), fillAmount);
 
-    // Execution price = maker's price (seller's ask)
     uint256 notional = (fillAmount * priceSell) / ONE;
     uint256 makerFee = (notional * 100) / BPS;
     uint256 takerFee = (notional * 200) / BPS;
 
-    // Seller receives notional - fee
     assertEq(collateral.balanceOf(maker), makerBefore + notional - makerFee);
-    // Buyer pays notional + fee
     assertEq(collateral.balanceOf(taker), takerBefore - notional - takerFee);
 
-    // Maker still has 70 remaining
     bytes32 makerHash = exchange.hashOrder(makerOrder);
     assertEq(exchange.filledAmounts(makerHash), fillAmount);
     assertFalse(exchange.orderInvalidated(makerHash));
@@ -617,7 +603,6 @@ contract PredictionMarketCLOBTest is Test {
     bytes32 makerHash = exchange.hashOrder(makerOrder);
     assertTrue(exchange.orderInvalidated(makerHash));
 
-    // Attempting to match should revert with "invalidated"
     bytes memory makerSig = _signOrder(makerOrder, makerPk);
     bytes memory takerSig = _signOrder(takerOrder, takerPk);
 
@@ -679,7 +664,6 @@ contract PredictionMarketCLOBTest is Test {
 
     assertTrue(exchange.orderInvalidated(makerHash));
 
-    // Attempting a second fill should revert
     MyriadCTFExchange.Order memory taker2Order = _buildOrder({
       trader: taker,
       marketId_: marketId,
@@ -832,16 +816,13 @@ contract PredictionMarketCLOBTest is Test {
   }
 
   function testMarketIndexStartsAt1() public view {
-    // Market 0 should not exist as a real market
-    // The first market created in setUp() should be marketId == 1
     assertEq(marketId, 1);
     assertEq(manager.marketIndex(), 2); // next available ID
   }
 
-  function testFillAmountOneWei() public {
-    // Minimum fill: 1 wei
+  function testFillAmountOneWeiReverts() public {
     uint256 makerAmount = 100 ether;
-    uint256 takerAmount = 1; // 1 wei
+    uint256 takerAmount = 1;
     uint256 priceYes = (60 * ONE) / 100;
     uint256 priceNo = (40 * ONE) / 100;
 
@@ -880,13 +861,9 @@ contract PredictionMarketCLOBTest is Test {
     bytes memory makerSig = _signOrder(makerOrder, makerPk);
     bytes memory takerSig = _signOrder(takerOrder, takerPk);
 
-    // Fill 1 wei of shares — notionals will round to 0, which means 0 collateral transferred
-    // yesNotional = (1 * 0.6e18) / 1e18 = 0; noNotional = 1 - 0 = 1
-    // This should still work (taker pays 1 wei of collateral)
+    // 1 wei fill at 60% → yesNotional = 0, rejected by notional guard
+    vm.expectRevert("notional 0");
     feeModule.matchOrdersWithFees(makerOrder, makerSig, takerOrder, takerSig, 1);
-
-    assertEq(exchange.filledAmounts(exchange.hashOrder(makerOrder)), 1);
-    assertEq(exchange.filledAmounts(exchange.hashOrder(takerOrder)), 1);
   }
 
   function testZeroFeeMarket() public {
@@ -950,11 +927,9 @@ contract PredictionMarketCLOBTest is Test {
     uint256 makerNotional = (amount * priceYes) / ONE;
     uint256 takerNotional = amount - makerNotional;
 
-    // No fees — exact notional deducted
     assertEq(collateral.balanceOf(maker), makerBefore - makerNotional);
     assertEq(collateral.balanceOf(taker), takerBefore - takerNotional);
 
-    // No fees accrued
     assertEq(feeModule.accruedFees(address(collateral)), 0);
     assertEq(collateral.balanceOf(address(feeModule)), 0);
   }
@@ -1007,15 +982,12 @@ contract PredictionMarketCLOBTest is Test {
 
     feeModule.matchOrdersWithFees(makerOrder, makerSig, takerOrder, takerSig, amount);
 
-    // Execution at maker's price (0.50), taker gets the benefit
     uint256 executionPrice = sellerAsk;
     uint256 notional = (amount * executionPrice) / ONE;
     uint256 makerFee = (notional * 100) / BPS;
     uint256 takerFee = (notional * 200) / BPS;
 
-    // Seller gets notional - makerFee
     assertEq(collateral.balanceOf(maker), makerBefore + notional - makerFee);
-    // Buyer pays notional + takerFee (at 0.50 not 0.70 — saves 0.20 per share)
     assertEq(collateral.balanceOf(taker), takerBefore - notional - takerFee);
   }
 
@@ -1119,10 +1091,17 @@ contract PredictionMarketCLOBTest is Test {
 
     vm.expectRevert("invalid outcome");
     manager.adminResolveMarket(marketId, -2);
+
+    // -1 is no longer valid for adminResolveMarket (use adminVoidMarket)
+    vm.expectRevert("invalid outcome");
+    manager.adminResolveMarket(marketId, -1);
   }
 
-  function testAdminResolveVoid() public {
-    int256 result = manager.adminResolveMarket(marketId, -1);
+  function testAdminVoidMarket() public {
+    uint256 yesPayout = (60 * ONE) / 100; // 60%
+    uint256 noPayout = ONE - yesPayout;   // 40%
+
+    int256 result = manager.adminVoidMarket(marketId, yesPayout, noPayout);
     assertEq(result, -1);
 
     // Market is resolved
@@ -1130,6 +1109,171 @@ contract PredictionMarketCLOBTest is Test {
 
     // Outcome is -1 (voided)
     assertEq(manager.getMarketOutcome(marketId), -1);
+
+    // Payouts are stored correctly
+    (uint256 storedYes, uint256 storedNo) = manager.getVoidedPayouts(marketId);
+    assertEq(storedYes, yesPayout);
+    assertEq(storedNo, noPayout);
+  }
+
+  function testAdminVoidMarketBadPayoutsReverts() public {
+    // Payouts don't sum to 1e18
+    vm.expectRevert("payouts must sum to 1e18");
+    manager.adminVoidMarket(marketId, (50 * ONE) / 100, (60 * ONE) / 100);
+
+    vm.expectRevert("payouts must sum to 1e18");
+    manager.adminVoidMarket(marketId, 0, 0);
+  }
+
+  function testRedeemVoided5050() public {
+    // Mint positions for maker (holds YES) and taker (holds NO)
+    uint256 amount = 100 ether;
+    uint256 priceYes = (60 * ONE) / 100;
+    uint256 priceNo = (40 * ONE) / 100;
+
+    collateral.mint(maker, 1000 ether);
+    collateral.mint(taker, 1000 ether);
+
+    vm.startPrank(maker);
+    collateral.approve(address(conditionalTokens), type(uint256).max);
+    collateral.approve(address(exchange), type(uint256).max);
+    vm.stopPrank();
+
+    vm.startPrank(taker);
+    collateral.approve(address(conditionalTokens), type(uint256).max);
+    collateral.approve(address(exchange), type(uint256).max);
+    vm.stopPrank();
+
+    MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, priceYes, 500);
+    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, amount, priceNo, 501);
+    feeModule.matchOrdersWithFees(makerOrder, _signOrder(makerOrder, makerPk), takerOrder, _signOrder(takerOrder, takerPk), amount);
+
+    uint256 yesId = conditionalTokens.getTokenId(marketId, 0);
+    uint256 noId = conditionalTokens.getTokenId(marketId, 1);
+    assertEq(conditionalTokens.balanceOf(maker, yesId), amount);
+    assertEq(conditionalTokens.balanceOf(taker, noId), amount);
+
+    uint256 yesPayout = (50 * ONE) / 100;
+    uint256 noPayout = (50 * ONE) / 100;
+    manager.adminVoidMarket(marketId, yesPayout, noPayout);
+
+    uint256 makerBefore = collateral.balanceOf(maker);
+    vm.prank(maker);
+    conditionalTokens.redeemVoided(marketId);
+    assertEq(collateral.balanceOf(maker) - makerBefore, (amount * yesPayout) / ONE);
+
+    uint256 takerBefore = collateral.balanceOf(taker);
+    vm.prank(taker);
+    conditionalTokens.redeemVoided(marketId);
+    assertEq(collateral.balanceOf(taker) - takerBefore, (amount * noPayout) / ONE);
+
+    assertEq(conditionalTokens.balanceOf(maker, yesId), 0);
+    assertEq(conditionalTokens.balanceOf(taker, noId), 0);
+  }
+
+  function testRedeemVoidedAsymmetric() public {
+    // Void at 70/30 — asymmetric payout
+    uint256 amount = 100 ether;
+    uint256 priceYes = (60 * ONE) / 100;
+    uint256 priceNo = (40 * ONE) / 100;
+
+    collateral.mint(maker, 1000 ether);
+    collateral.mint(taker, 1000 ether);
+
+    vm.startPrank(maker);
+    collateral.approve(address(conditionalTokens), type(uint256).max);
+    collateral.approve(address(exchange), type(uint256).max);
+    vm.stopPrank();
+
+    vm.startPrank(taker);
+    collateral.approve(address(conditionalTokens), type(uint256).max);
+    collateral.approve(address(exchange), type(uint256).max);
+    vm.stopPrank();
+
+    MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, priceYes, 510);
+    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, amount, priceNo, 511);
+    feeModule.matchOrdersWithFees(makerOrder, _signOrder(makerOrder, makerPk), takerOrder, _signOrder(takerOrder, takerPk), amount);
+
+    uint256 yesPayout = (70 * ONE) / 100;
+    uint256 noPayout = (30 * ONE) / 100;
+    manager.adminVoidMarket(marketId, yesPayout, noPayout);
+
+    uint256 makerBefore = collateral.balanceOf(maker);
+    vm.prank(maker);
+    conditionalTokens.redeemVoided(marketId);
+    assertEq(collateral.balanceOf(maker) - makerBefore, (amount * yesPayout) / ONE);
+
+    uint256 takerBefore = collateral.balanceOf(taker);
+    vm.prank(taker);
+    conditionalTokens.redeemVoided(marketId);
+    assertEq(collateral.balanceOf(taker) - takerBefore, (amount * noPayout) / ONE);
+  }
+
+  function testRedeemVoidedBothSides() public {
+    // User holds both YES and NO tokens (e.g., from splitPosition)
+    uint256 amount = 50 ether;
+
+    collateral.mint(maker, 1000 ether);
+
+    vm.startPrank(maker);
+    collateral.approve(address(conditionalTokens), type(uint256).max);
+    conditionalTokens.splitPosition(marketId, amount);
+    vm.stopPrank();
+
+    uint256 yesId = conditionalTokens.getTokenId(marketId, 0);
+    uint256 noId = conditionalTokens.getTokenId(marketId, 1);
+    assertEq(conditionalTokens.balanceOf(maker, yesId), amount);
+    assertEq(conditionalTokens.balanceOf(maker, noId), amount);
+
+    // Void at 80/20
+    uint256 yesPayout = (80 * ONE) / 100;
+    uint256 noPayout = (20 * ONE) / 100;
+    manager.adminVoidMarket(marketId, yesPayout, noPayout);
+
+    uint256 before = collateral.balanceOf(maker);
+    vm.prank(maker);
+    conditionalTokens.redeemVoided(marketId);
+
+    uint256 expectedPayout = (amount * yesPayout) / ONE + (amount * noPayout) / ONE;
+    assertEq(collateral.balanceOf(maker) - before, expectedPayout);
+    assertEq(expectedPayout, amount);
+  }
+
+  function testRedeemVoidedNoBalanceReverts() public {
+    manager.adminVoidMarket(marketId, (50 * ONE) / 100, (50 * ONE) / 100);
+
+    // maker has no tokens
+    vm.prank(maker);
+    vm.expectRevert("no balance");
+    conditionalTokens.redeemVoided(marketId);
+  }
+
+  function testRedeemVoidedNotVoidedReverts() public {
+    // Resolve normally (YES wins)
+    manager.adminResolveMarket(marketId, 0);
+
+    vm.prank(maker);
+    vm.expectRevert("not voided");
+    conditionalTokens.redeemVoided(marketId);
+  }
+
+  function testRedeemVoidedDoubleRedeemReverts() public {
+    uint256 amount = 50 ether;
+    collateral.mint(maker, 1000 ether);
+
+    vm.startPrank(maker);
+    collateral.approve(address(conditionalTokens), type(uint256).max);
+    conditionalTokens.splitPosition(marketId, amount);
+    vm.stopPrank();
+
+    manager.adminVoidMarket(marketId, (50 * ONE) / 100, (50 * ONE) / 100);
+
+    vm.prank(maker);
+    conditionalTokens.redeemVoided(marketId);
+
+    vm.prank(maker);
+    vm.expectRevert("no balance");
+    conditionalTokens.redeemVoided(marketId);
   }
 
   function testFillZeroReverts() public {
@@ -1220,9 +1364,8 @@ contract PredictionMarketCLOBTest is Test {
 
     feeModule.matchOrdersWithFees(makerOrder, makerSig, takerOrder, takerSig, amount);
 
-    // CT should receive exactly fillAmount of collateral (no dust left in exchange)
     uint256 ctAfter = collateral.balanceOf(address(conditionalTokens));
-    assertEq(ctAfter - ctBefore, amount, "CT collateral should match fillAmount exactly");
+    assertEq(ctAfter - ctBefore, amount);
   }
 
   function testPausedMarketReverts() public {
@@ -1326,7 +1469,6 @@ contract PredictionMarketCLOBTest is Test {
       amount
     );
 
-    // Compute expected total fees
     uint256 makerNotional = (amount * priceYes) / ONE;
     uint256 takerNotional = amount - makerNotional;
     uint256 makerFee = (makerNotional * 100) / BPS;
@@ -1336,7 +1478,6 @@ contract PredictionMarketCLOBTest is Test {
     assertEq(feeModule.accruedFees(address(collateral)), totalFees);
     assertEq(collateral.balanceOf(address(feeModule)), totalFees);
 
-    // Fee admin withdraws a specific amount to a treasury wallet
     address treasury = address(0x1111);
     feeModule.withdrawFees(address(collateral), treasury, totalFees);
 
@@ -1402,7 +1543,6 @@ contract PredictionMarketCLOBTest is Test {
     MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, amount, priceNo, 321);
     feeModule.matchOrdersWithFees(makerOrder, _signOrder(makerOrder, makerPk), takerOrder, _signOrder(takerOrder, takerPk), amount);
 
-    // Random address tries to withdraw — should fail
     uint256 accrued = feeModule.accruedFees(address(collateral));
     vm.prank(maker);
     vm.expectRevert("not fee admin");
@@ -1441,10 +1581,8 @@ contract PredictionMarketCLOBTest is Test {
     feeModule.matchOrdersWithFees(m2, _signOrder(m2, makerPk), t2, _signOrder(t2, takerPk), amount);
 
     uint256 feesAfterSecond = collateral.balanceOf(address(feeModule));
-    // Fees should have doubled (same amounts)
     assertEq(feesAfterSecond, feesAfterFirst * 2);
 
-    // Fee admin withdraws all accumulated fees at once
     uint256 totalAccrued = feeModule.accruedFees(address(collateral));
     assertEq(totalAccrued, feesAfterSecond);
 

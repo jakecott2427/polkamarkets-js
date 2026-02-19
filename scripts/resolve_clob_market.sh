@@ -41,16 +41,19 @@ fi
 export MARKET_ID
 export OUTCOME
 
-outcome_label() {
-  case "$1" in
-    0)  echo "YES" ;;
-    1)  echo "NO" ;;
-    -1) echo "VOID" ;;
-  esac
-}
+if [[ "${OUTCOME}" == "-1" ]]; then
+  read -r -p "YES payout % (0-100, NO gets the remainder) [50]: " YES_PAYOUT_PCT
+  YES_PAYOUT_PCT="${YES_PAYOUT_PCT:-50}"
+  export YES_PAYOUT_PCT
+  NO_PAYOUT_PCT=$((100 - YES_PAYOUT_PCT))
+  echo ""
+  echo "Voiding market ${MARKET_ID} → YES ${YES_PAYOUT_PCT}% / NO ${NO_PAYOUT_PCT}%"
+else
+  outcome_label() { case "$1" in 0) echo "YES" ;; 1) echo "NO" ;; esac; }
+  echo ""
+  echo "Resolving market ${MARKET_ID} → outcome ${OUTCOME} ($(outcome_label "${OUTCOME}"))"
+fi
 
-echo ""
-echo "Resolving market ${MARKET_ID} → outcome ${OUTCOME} ($(outcome_label "${OUTCOME}"))"
 echo ""
 
 forge script script/ResolveMarket.s.sol:ResolveMarket \
@@ -58,4 +61,8 @@ forge script script/ResolveMarket.s.sol:ResolveMarket \
   --broadcast
 
 echo ""
-echo "✅ Market ${MARKET_ID} resolved to $(outcome_label "${OUTCOME}")."
+if [[ "${OUTCOME}" == "-1" ]]; then
+  echo "✅ Market ${MARKET_ID} voided (YES ${YES_PAYOUT_PCT}% / NO ${NO_PAYOUT_PCT}%)."
+else
+  echo "✅ Market ${MARKET_ID} resolved to $(outcome_label "${OUTCOME}")."
+fi

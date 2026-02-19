@@ -19,4 +19,6 @@ interface IMyriadMarketManager {
   function isMarketPaused(uint256 marketId) external view returns (bool);
 
   function getMarketExecutionMode(uint256 marketId) external view returns (uint8);
+
+  function getVoidedPayouts(uint256 marketId) external view returns (uint256 yesPayout, uint256 noPayout);
 }

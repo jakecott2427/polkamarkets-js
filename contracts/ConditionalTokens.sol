@@ -68,6 +68,37 @@ contract ConditionalTokens is ERC1155, ReentrancyGuard {
     collateral.safeTransfer(msg.sender, amount);
   }
 
+  /// @notice Redeem positions from a voided market using admin-specified payout ratios.
+  function redeemVoided(uint256 marketId) external nonReentrant {
+    int256 outcome = manager.getMarketOutcome(marketId);
+    require(outcome == -1, "not voided");
+
+    (uint256 yesPayout, uint256 noPayout) = manager.getVoidedPayouts(marketId);
+
+    uint256 yesId = getTokenId(marketId, 0);
+    uint256 noId = getTokenId(marketId, 1);
+    uint256 yesBalance = balanceOf(msg.sender, yesId);
+    uint256 noBalance = balanceOf(msg.sender, noId);
+    require(yesBalance > 0 || noBalance > 0, "no balance");
+
+    uint256 totalPayout;
+
+    if (yesBalance > 0) {
+      _burn(msg.sender, yesId, yesBalance);
+      totalPayout += (yesBalance * yesPayout) / 1e18;
+    }
+
+    if (noBalance > 0) {
+      _burn(msg.sender, noId, noBalance);
+      totalPayout += (noBalance * noPayout) / 1e18;
+    }
+
+    require(totalPayout > 0, "zero payout");
+
+    IERC20 collateral = manager.getMarketCollateral(marketId);
+    collateral.safeTransfer(msg.sender, totalPayout);
+  }
+
   /// @notice Exchange-only mint for mint-matched buys.
   function mintPositionsTo(
     address yesRecipient,
