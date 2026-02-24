@@ -24,7 +24,7 @@ contract MyriadCTFExchange is ReentrancyGuard, ERC1155Holder, EIP712 {
   struct Order {
     address trader;
     uint256 marketId;
-    uint8 outcome; // 0 = YES, 1 = NO
+    uint8 outcome; // 0 = outcome 0, 1 = outcome 1
     Side side;
     uint256 amount; // max shares for this order
     uint256 price; // collateral per share, 1e18 precision
