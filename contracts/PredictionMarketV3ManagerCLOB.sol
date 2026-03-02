@@ -6,12 +6,11 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import "./AdminRegistry.sol";
-import "./IMarketOracle.sol";
+import "./IRealityETH_ERC20.sol";
 import "./IMyriadMarketManager.sol";
 
 /// @title PredictionMarketV3ManagerCLOB
-/// @notice Market lifecycle registry for AMM and CLOB markets.
-///         Resolution is delegated to pluggable oracle contracts that implement IMarketOracle.
+/// @notice Market lifecycle registry for AMM and CLOB markets without Lands.
 contract PredictionMarketV3ManagerCLOB is ReentrancyGuard, IMyriadMarketManager {
   using SafeERC20 for IERC20;
 
@@ -27,7 +26,10 @@ contract PredictionMarketV3ManagerCLOB is ReentrancyGuard, IMyriadMarketManager 
     uint8 outcomes;
     string question;
     string image;
+    address arbitrator;
+    uint32 realitioTimeout;
     MarketState state;
+    bytes32 questionId;
     int256 resolvedOutcome;
     bool paused;
     ExecutionMode executionMode;
@@ -35,22 +37,23 @@ contract PredictionMarketV3ManagerCLOB is ReentrancyGuard, IMyriadMarketManager 
     uint256 outcome1TokenId;
     address feeModule;
     address creator;
-    address oracle;
   }
 
   struct CreateMarketParams {
     uint256 closesAt;
     string question;
     string image;
+    address arbitrator;
+    uint32 realitioTimeout;
     ExecutionMode executionMode;
     address feeModule;
-    address oracle;
-    bytes oracleData;
   }
 
   uint256 private constant ONE = 1e18;
+  uint256 public constant MINIMUM_REALITIO_TIMEOUT = 3600;
 
   AdminRegistry public immutable registry;
+  IRealityETH_ERC20 public immutable realitio;
   IERC20 public immutable collateralToken;
 
   uint256 public marketIndex = 1;
@@ -67,16 +70,18 @@ contract PredictionMarketV3ManagerCLOB is ReentrancyGuard, IMyriadMarketManager 
   );
   event MarketResolved(address indexed user, uint256 indexed marketId, int256 outcomeId, uint256 timestamp);
   event MarketPaused(address indexed user, uint256 indexed marketId, bool paused, uint256 timestamp);
-  event MarketOracleUpdated(uint256 indexed marketId, address oldOracle, address newOracle);
 
-  constructor(AdminRegistry _registry, IERC20 _collateralToken) {
+  constructor(AdminRegistry _registry, IRealityETH_ERC20 _realitio, IERC20 _collateralToken) {
     registry = _registry;
+    realitio = _realitio;
     collateralToken = _collateralToken;
   }
 
   function createMarket(CreateMarketParams calldata params) external nonReentrant returns (uint256 marketId) {
     require(registry.hasRole(registry.MARKET_ADMIN_ROLE(), msg.sender), "not market admin");
     require(params.closesAt > block.timestamp, "close in past");
+    require(params.arbitrator != address(0), "arbitrator 0");
+    require(params.realitioTimeout >= MINIMUM_REALITIO_TIMEOUT, "timeout < 1h");
 
     marketId = marketIndex;
     marketIndex += 1;
@@ -88,6 +93,8 @@ contract PredictionMarketV3ManagerCLOB is ReentrancyGuard, IMyriadMarketManager 
     market.outcomes = 2;
     market.question = params.question;
     market.image = params.image;
+    market.arbitrator = params.arbitrator;
+    market.realitioTimeout = params.realitioTimeout;
     market.state = MarketState.open;
     market.resolvedOutcome = -3;
     market.executionMode = params.executionMode;
@@ -95,32 +102,31 @@ contract PredictionMarketV3ManagerCLOB is ReentrancyGuard, IMyriadMarketManager 
     market.outcome1TokenId = _getTokenId(marketId, 1);
     market.feeModule = params.feeModule;
     market.creator = msg.sender;
-    market.oracle = params.oracle;
 
-    if (params.oracle != address(0) && params.oracleData.length > 0) {
-      IMarketOracle(params.oracle).initialize(marketId, params.oracleData);
-    }
+    market.questionId = realitio.askQuestionERC20(
+      2,
+      params.question,
+      params.arbitrator,
+      params.realitioTimeout,
+      uint32(params.closesAt),
+      0,
+      0
+    );
 
     emit MarketCreated(msg.sender, marketId, params.question, params.image, address(collateralToken), params.executionMode);
   }
 
-  /// @notice Permissionless resolution via the market's oracle.
   function resolveMarket(uint256 marketId) external nonReentrant returns (int256 outcomeId) {
     Market storage market = markets[marketId];
     require(market.id == marketId, "!m");
     require(getMarketState(marketId) == MarketState.closed, "!closed");
     require(market.state != MarketState.resolved, "resolved");
-    require(market.oracle != address(0), "no oracle");
 
-    (int256 outcome, bool resolved) = IMarketOracle(market.oracle).getResult(marketId);
-    require(resolved, "oracle: not resolved");
-    require(outcome == 0 || outcome == 1 || outcome == -1, "invalid outcome");
-
-    market.resolvedOutcome = outcome;
+    outcomeId = int256(uint256(realitio.resultFor(market.questionId)));
+    market.resolvedOutcome = outcomeId;
     market.state = MarketState.resolved;
 
-    emit MarketResolved(msg.sender, marketId, outcome, block.timestamp);
-    return outcome;
+    emit MarketResolved(msg.sender, marketId, outcomeId, block.timestamp);
   }
 
   function adminResolveMarket(uint256 marketId, int256 outcomeId) external nonReentrant returns (int256) {
@@ -162,30 +168,6 @@ contract PredictionMarketV3ManagerCLOB is ReentrancyGuard, IMyriadMarketManager 
     emit MarketResolved(msg.sender, marketId, -1, block.timestamp);
 
     return -1;
-  }
-
-  /// @notice Update the oracle address for a market (e.g. to fix a misconfigured oracle).
-  /// @param newOracle The new oracle address. Pass address(0) to remove the oracle.
-  /// @param oracleData Optional ABI-encoded data to initialize the new oracle.
-  function updateMarketOracle(
-    uint256 marketId,
-    address newOracle,
-    bytes calldata oracleData
-  ) external nonReentrant {
-    require(registry.hasRole(registry.MARKET_ADMIN_ROLE(), msg.sender), "not market admin");
-
-    Market storage market = markets[marketId];
-    require(market.id == marketId, "!m");
-    require(market.state != MarketState.resolved, "resolved");
-
-    address oldOracle = market.oracle;
-    market.oracle = newOracle;
-
-    if (newOracle != address(0) && oracleData.length > 0) {
-      IMarketOracle(newOracle).initialize(marketId, oracleData);
-    }
-
-    emit MarketOracleUpdated(marketId, oldOracle, newOracle);
   }
 
   function pauseMarket(uint256 marketId, bool paused) external nonReentrant {
@@ -232,13 +214,6 @@ contract PredictionMarketV3ManagerCLOB is ReentrancyGuard, IMyriadMarketManager 
     require(market.id == marketId, "!m");
 
     return (market.outcome0TokenId, market.outcome1TokenId);
-  }
-
-  function getMarketOracle(uint256 marketId) external view returns (address) {
-    Market storage market = markets[marketId];
-    require(market.id == marketId, "!m");
-
-    return market.oracle;
   }
 
   function getMarketCollateral(uint256 marketId) external view override returns (IERC20) {
