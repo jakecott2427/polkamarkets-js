@@ -83,6 +83,10 @@ contract PredictionMarketV3ManagerCLOB is ReentrancyGuard, IMyriadMarketManager 
     require(params.arbitrator != address(0), "arbitrator 0");
     require(params.realitioTimeout >= MINIMUM_REALITIO_TIMEOUT, "timeout < 1h");
 
+    // Prevent token ID collisions: getTokenId() uses (marketId << 1), which
+    // overflows if marketId >= 2^255. type(uint128).max is a safe practical limit.
+    require(marketIndex < type(uint128).max, "market id overflow");
+
     marketId = marketIndex;
     marketIndex += 1;
 

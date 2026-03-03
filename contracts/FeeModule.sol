@@ -4,131 +4,159 @@ pragma solidity ^0.8.26;
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import "./AdminRegistry.sol";
-import "./MyriadCTFExchange.sol";
 
 /// @title FeeModule
-/// @notice Stores per-price-point maker/taker fee schedules (100 entries each,
-///         one per whole-percent price bucket 0-99%).  Fees accrue inside this
-///         contract; a fee-admin can withdraw any amount to any wallet.
+/// @notice Stores per-market fee schedules as sorted tiers (up to MAX_TIERS each).
+///         The exchange pushes tokens here and calls accrueFees() for accounting.
+///         A fee-admin can withdraw to the configured treasury address only.
+///
+/// @dev Tiers are sorted ascending by maxPrice. The first tier whose maxPrice is
+///      strictly greater than the trade price is applied; if none match, fees are 0.
+///      Each FeeTier is packed into a single storage slot (128 + 64 + 64 = 256 bits).
 contract FeeModule {
   using SafeERC20 for IERC20;
 
+  // ─── Types ───────────────────────────────────────────────────────────
+
+  /// @notice A fee tier covering prices in [prev.maxPrice, maxPrice).
+  ///         Packed into one storage slot.
+  struct FeeTier {
+    uint128 maxPrice;   // exclusive upper bound in 1e18 (0 < maxPrice <= 1e18)
+    uint64 makerFeeBps; // maker fee in basis points (0-10000)
+    uint64 takerFeeBps; // taker fee in basis points (0-10000)
+  }
+
+  // ─── Constants ───────────────────────────────────────────────────────
+
   uint256 private constant BPS = 10000;
   uint256 private constant ONE = 1e18;
+  uint256 public constant MAX_TIERS = 100;
+
+  // ─── State ───────────────────────────────────────────────────────────
 
   AdminRegistry public immutable registry;
-  MyriadCTFExchange public immutable exchange;
 
-  /// @dev makerFees[marketId][priceIndex] = fee in BPS
-  mapping(uint256 => uint16[100]) internal _makerFees;
-  /// @dev takerFees[marketId][priceIndex] = fee in BPS
-  mapping(uint256 => uint16[100]) internal _takerFees;
+  /// @dev Fee tiers per market, sorted ascending by maxPrice.
+  mapping(uint256 => FeeTier[]) internal _marketFees;
 
   /// @notice Total accrued (unclaimed) fees per collateral token.
   mapping(address => uint256) public accruedFees;
 
-  event MarketFeesUpdated(uint256 indexed marketId);
-  event FeesAccrued(address indexed token, uint256 amount);
-  event FeesWithdrawn(address indexed to, address indexed token, uint256 amount);
+  /// @notice Only address allowed to push fee accruals (set to the exchange).
+  address public exchange;
 
-  constructor(AdminRegistry _registry, MyriadCTFExchange _exchange) {
+  /// @notice Sole recipient of fee withdrawals.
+  address public treasury;
+
+  // ─── Events ──────────────────────────────────────────────────────────
+
+  event MarketFeesUpdated(uint256 indexed marketId, uint256 tierCount);
+  event FeesAccrued(address indexed token, uint256 amount);
+  event FeesWithdrawn(address indexed treasury, address indexed token, uint256 amount);
+  event ExchangeUpdated(address indexed newExchange);
+  event TreasuryUpdated(address indexed newTreasury);
+
+  // ─── Constructor ─────────────────────────────────────────────────────
+
+  constructor(AdminRegistry _registry, address _treasury) {
+    require(_treasury != address(0), "treasury 0");
     registry = _registry;
-    exchange = _exchange;
+    treasury = _treasury;
   }
 
   // ─── Admin setters ──────────────────────────────────────────────────
 
-  /// @notice Set the full 100-element fee schedules for a market.
-  ///         Index i corresponds to the price bucket [i%, (i+1)%).
-  function setMarketFees(
-    uint256 marketId,
-    uint16[100] calldata makerFeeBps,
-    uint16[100] calldata takerFeeBps
-  ) external {
+  /// @notice Set the exchange address that is allowed to call accrueFees().
+  function setExchange(address newExchange) external {
+    require(registry.hasRole(registry.DEFAULT_ADMIN_ROLE(), msg.sender), "not admin");
+    require(newExchange != address(0), "exchange 0");
+    exchange = newExchange;
+    emit ExchangeUpdated(newExchange);
+  }
+
+  /// @notice Update the treasury address; only DEFAULT_ADMIN can call this.
+  function setTreasury(address newTreasury) external {
+    require(registry.hasRole(registry.DEFAULT_ADMIN_ROLE(), msg.sender), "not admin");
+    require(newTreasury != address(0), "treasury 0");
+    treasury = newTreasury;
+    emit TreasuryUpdated(newTreasury);
+  }
+
+  /// @notice Set fee schedule for a market as an array of sorted tiers.
+  ///         Tiers must be sorted strictly ascending by maxPrice.
+  ///         The last tier's maxPrice acts as the upper bound for all prices up to 1e18.
+  /// @param tiers Up to MAX_TIERS entries. Pass an empty array to clear all fees.
+  function setMarketFees(uint256 marketId, FeeTier[] calldata tiers) external {
     require(registry.hasRole(registry.FEE_ADMIN_ROLE(), msg.sender), "not fee admin");
-    for (uint256 i = 0; i < 100; i++) {
-      require(makerFeeBps[i] <= uint16(BPS) && takerFeeBps[i] <= uint16(BPS), "fee too high");
+    require(tiers.length <= MAX_TIERS, "too many tiers");
+
+    for (uint256 i = 0; i < tiers.length; i++) {
+      require(tiers[i].maxPrice > 0 && tiers[i].maxPrice <= ONE, "invalid max price");
+      require(tiers[i].makerFeeBps <= BPS && tiers[i].takerFeeBps <= BPS, "fee too high");
+      if (i > 0) {
+        require(tiers[i].maxPrice > tiers[i - 1].maxPrice, "tiers not sorted");
+      }
     }
-    _makerFees[marketId] = makerFeeBps;
-    _takerFees[marketId] = takerFeeBps;
-    emit MarketFeesUpdated(marketId);
+
+    // Replace storage array.
+    delete _marketFees[marketId];
+    for (uint256 i = 0; i < tiers.length; i++) {
+      _marketFees[marketId].push(tiers[i]);
+    }
+
+    emit MarketFeesUpdated(marketId, tiers.length);
   }
 
   // ─── Getters ─────────────────────────────────────────────────────────
 
-  /// @notice Return the full 100-element maker fee schedule for a market.
-  function getMarketMakerFees(uint256 marketId) external view returns (uint16[100] memory) {
-    return _makerFees[marketId];
+  /// @notice Return all fee tiers for a market.
+  function getMarketFees(uint256 marketId) external view returns (FeeTier[] memory) {
+    return _marketFees[marketId];
   }
 
-  /// @notice Return the full 100-element taker fee schedule for a market.
-  function getMarketTakerFees(uint256 marketId) external view returns (uint16[100] memory) {
-    return _takerFees[marketId];
-  }
-
-  /// @notice Convenience: return (makerBps, takerBps) for a given price.
+  /// @notice Return (makerBps, takerBps) for the tier that covers `price`.
+  ///         Returns (0, 0) if no tier is configured or price is above all tiers.
   function getFeesAtPrice(uint256 marketId, uint256 price) external view returns (uint16 makerBps, uint16 takerBps) {
-    uint256 idx = _priceIndex(price);
-    return (_makerFees[marketId][idx], _takerFees[marketId][idx]);
+    return _lookupFees(marketId, price);
   }
 
-  // ─── Match + accrue ─────────────────────────────────────────────────
+  // ─── Fee accrual ─────────────────────────────────────────────────────
 
-  function matchOrdersWithFees(
-    MyriadCTFExchange.Order calldata maker,
-    bytes calldata makerSig,
-    MyriadCTFExchange.Order calldata taker,
-    bytes calldata takerSig,
-    uint256 fillAmount
-  ) external {
-    require(registry.hasRole(registry.OPERATOR_ROLE(), msg.sender), "not operator");
-    require(maker.marketId == taker.marketId, "market mismatch");
-
-    uint256 makerIdx = _priceIndex(maker.price);
-    uint256 takerIdx;
-
-    if (maker.side != taker.side) {
-      takerIdx = makerIdx;
-    } else {
-      takerIdx = _priceIndex(taker.price);
-    }
-
-    MyriadCTFExchange.FeeConfig memory feeConfig = MyriadCTFExchange.FeeConfig({
-      makerFeeBps: _makerFees[maker.marketId][makerIdx],
-      takerFeeBps: _takerFees[maker.marketId][takerIdx]
-    });
-
-    uint256 totalFees = exchange.matchOrders(maker, makerSig, taker, takerSig, fillAmount, feeConfig);
-
-    if (totalFees > 0) {
-      address token = address(exchange.manager().getMarketCollateral(maker.marketId));
-      accruedFees[token] += totalFees;
-      emit FeesAccrued(token, totalFees);
-    }
+  /// @notice Called by the exchange after tokens have been transferred here.
+  ///         Only the registered exchange may call this.
+  function accrueFees(address token, uint256 amount) external {
+    require(msg.sender == exchange, "only exchange");
+    accruedFees[token] += amount;
+    emit FeesAccrued(token, amount);
   }
 
-  // ─── Withdraw ─────────────────────────────────────────────────────
+  // ─── Withdrawal ──────────────────────────────────────────────────────
 
-  /// @notice Withdraw accrued fees for `token` to the specified address.
-  ///         Only callable by a fee-admin.
-  function withdrawFees(address token, address to, uint256 amount) external {
+  /// @notice Withdraw accrued fees to the treasury.
+  ///         Only callable by a fee-admin; destination is always `treasury`.
+  function withdrawFees(address token, uint256 amount) external {
     require(registry.hasRole(registry.FEE_ADMIN_ROLE(), msg.sender), "not fee admin");
-    require(to != address(0), "to 0");
+    require(treasury != address(0), "treasury not set");
     require(amount > 0, "amount 0");
     require(amount <= accruedFees[token], "insufficient fees");
 
     accruedFees[token] -= amount;
-    IERC20(token).safeTransfer(to, amount);
+    IERC20(token).safeTransfer(treasury, amount);
 
-    emit FeesWithdrawn(to, token, amount);
+    emit FeesWithdrawn(treasury, token, amount);
   }
 
   // ─── Internal ─────────────────────────────────────────────────────
 
-  /// @dev Map a price (1e18 precision) to a 0-99 bucket index.
-  ///      price 0.00-0.0099... -> 0, 0.01-0.0199... -> 1, ... 0.99-0.9999... -> 99
-  function _priceIndex(uint256 price) internal pure returns (uint256) {
-    uint256 idx = (price * 100) / ONE;
-    return idx >= 100 ? 99 : idx;
+  /// @dev Linear scan through tiers (max MAX_TIERS = 100 iterations).
+  ///      Returns the fee pair for the first tier whose maxPrice > price.
+  function _lookupFees(uint256 marketId, uint256 price) internal view returns (uint16 makerBps, uint16 takerBps) {
+    FeeTier[] storage tiers = _marketFees[marketId];
+    for (uint256 i = 0; i < tiers.length; i++) {
+      if (price < tiers[i].maxPrice) {
+        return (uint16(tiers[i].makerFeeBps), uint16(tiers[i].takerFeeBps));
+      }
+    }
+    return (0, 0);
   }
 }

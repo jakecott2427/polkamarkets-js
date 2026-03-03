@@ -35,7 +35,8 @@ contract ConditionalTokens is ERC1155, ReentrancyGuard {
 
   function splitPosition(uint256 marketId, uint256 amount) external nonReentrant {
     require(amount > 0, "amount 0");
-    require(manager.getMarketState(marketId) != IMyriadMarketManager.MarketState.resolved, "resolved");
+    // Block splits once market is closed or resolved — no new positions in a non-open market.
+    require(manager.getMarketState(marketId) == IMyriadMarketManager.MarketState.open, "market not open");
 
     IERC20 collateral = manager.getMarketCollateral(marketId);
     collateral.safeTransferFrom(msg.sender, address(this), amount);
@@ -74,6 +75,8 @@ contract ConditionalTokens is ERC1155, ReentrancyGuard {
     require(outcome == -1, "not voided");
 
     (uint256 yesPayout, uint256 noPayout) = manager.getVoidedPayouts(marketId);
+    // Sanity-check the admin-set ratios on every redemption to prevent over-paying collateral.
+    require(yesPayout + noPayout == 1e18, "invalid payout ratios");
 
     uint256 yesId = getTokenId(marketId, 0);
     uint256 noId = getTokenId(marketId, 1);
@@ -107,6 +110,10 @@ contract ConditionalTokens is ERC1155, ReentrancyGuard {
     uint256 amount
   ) external onlyExchange {
     require(amount > 0, "amount 0");
+    // Guard against minting into a closed/paused/resolved market — a compromised
+    // exchange address should not be able to mint positions at will.
+    require(manager.getMarketState(marketId) == IMyriadMarketManager.MarketState.open, "market not open");
+    require(!manager.isMarketPaused(marketId), "market paused");
     _mint(yesRecipient, getTokenId(marketId, 0), amount, "");
     _mint(noRecipient, getTokenId(marketId, 1), amount, "");
   }
