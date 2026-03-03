@@ -123,10 +123,12 @@ contract FeeModule {
   // ─── Fee accrual ─────────────────────────────────────────────────────
 
   /// @notice Called by the exchange after tokens have been transferred here.
-  ///         Only the registered exchange may call this.
+  ///         Only the registered exchange may call this. Verifies that the
+  ///         contract actually holds at least the newly accrued amount.
   function accrueFees(address token, uint256 amount) external {
     require(msg.sender == exchange, "only exchange");
     accruedFees[token] += amount;
+    require(IERC20(token).balanceOf(address(this)) >= accruedFees[token], "balance < accrued");
     emit FeesAccrued(token, amount);
   }
 
@@ -150,6 +152,8 @@ contract FeeModule {
 
   /// @dev Linear scan through tiers (max MAX_TIERS = 100 iterations).
   ///      Returns the fee pair for the first tier whose maxPrice > price.
+  ///      Note: a price exactly equal to a tier's maxPrice falls to the next tier.
+  ///      The final tier should use maxPrice = ONE (1e18) to cover all valid prices.
   function _lookupFees(uint256 marketId, uint256 price) internal view returns (uint16 makerBps, uint16 takerBps) {
     FeeTier[] storage tiers = _marketFees[marketId];
     for (uint256 i = 0; i < tiers.length; i++) {

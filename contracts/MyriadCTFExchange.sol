@@ -22,6 +22,12 @@ interface IFeeModule {
   function accrueFees(address token, uint256 amount) external;
 }
 
+/// @dev Minimal interface for the NegRiskAdapter, used by cross-market matching.
+interface INegRiskAdapter {
+  function mintAllYesTokens(bytes32 eventId, uint256 amount, address recipient) external;
+  function getEventOutcomeCount(bytes32 eventId) external view returns (uint256);
+}
+
 /// @title MyriadCTFExchange
 /// @notice On-chain settlement engine for matched signed orders with partial fill support.
 ///         Fees are looked up from FeeModule and accrued there after each match.
@@ -62,6 +68,9 @@ contract MyriadCTFExchange is ReentrancyGuard, Pausable, ERC1155Holder, EIP712 {
   ConditionalTokens public immutable conditionalTokens;
   address public immutable feeModule;
 
+  /// @notice NegRiskAdapter address for cross-market matching.
+  address public negRiskAdapter;
+
   /// @notice Tracks cancellations — once true, the order can never be matched.
   mapping(bytes32 => bool) public orderInvalidated;
 
@@ -79,6 +88,14 @@ contract MyriadCTFExchange is ReentrancyGuard, Pausable, ERC1155Holder, EIP712 {
     uint256 fillAmount,
     uint256 makerTotalFilled,
     uint256 takerTotalFilled
+  );
+  /// @notice Emitted for each order filled in a cross-market match.
+  event CrossMarketOrderFilled(
+    bytes32 indexed orderHash,
+    bytes32 indexed eventId,
+    uint256 marketId,
+    uint256 fillAmount,
+    uint256 totalFilled
   );
 
   constructor(
@@ -103,6 +120,11 @@ contract MyriadCTFExchange is ReentrancyGuard, Pausable, ERC1155Holder, EIP712 {
   function unpause() external {
     require(registry.hasRole(registry.DEFAULT_ADMIN_ROLE(), msg.sender), "not admin");
     _unpause();
+  }
+
+  function setNegRiskAdapter(address _adapter) external {
+    require(registry.hasRole(registry.DEFAULT_ADMIN_ROLE(), msg.sender), "not admin");
+    negRiskAdapter = _adapter;
   }
 
   // ─── Order management ────────────────────────────────────────────────
@@ -150,6 +172,121 @@ contract MyriadCTFExchange is ReentrancyGuard, Pausable, ERC1155Holder, EIP712 {
     if (totalFees > 0) {
       address token = address(manager.getMarketCollateral(maker.marketId));
       IFeeModule(feeModule).accrueFees(token, totalFees);
+    }
+  }
+
+  // ─── Cross-market settlement ─────────────────────────────────────────
+
+  /// @notice Match BUY YES orders across different outcome markets in the same
+  ///         neg risk event. All orders must be BUY side, outcome 0 (YES), for
+  ///         distinct markets belonging to the same event. Prices must sum to >= ONE.
+  ///         The NegRiskAdapter mints YES tokens via split + convert.
+  ///         Same-trader orders across different outcomes are intentionally allowed,
+  ///         as a trader may legitimately want YES exposure on multiple outcomes.
+  function matchCrossMarketOrders(
+    Order[] calldata orders,
+    bytes[] calldata signatures,
+    uint256 fillAmount
+  ) external whenNotPaused nonReentrant {
+    require(registry.hasRole(registry.OPERATOR_ROLE(), msg.sender), "not operator");
+    require(negRiskAdapter != address(0), "no adapter");
+    require(orders.length >= 2, "need >= 2 orders");
+    require(signatures.length == orders.length, "sig count");
+    require(fillAmount > 0, "fill 0");
+
+    // Must provide one order per outcome to prevent stuck YES tokens
+    {
+      uint256 expectedCount = INegRiskAdapter(negRiskAdapter).getEventOutcomeCount(
+        manager.getEventId(orders[0].marketId)
+      );
+      require(orders.length == expectedCount, "must match all outcomes");
+    }
+
+    // Validate orders: all BUY YES, all different markets in the same event
+    bytes32 eventId = manager.getEventId(orders[0].marketId);
+    require(eventId != bytes32(0), "not neg risk");
+
+    uint256 priceSum;
+
+    for (uint256 i = 0; i < orders.length; i++) {
+      Order calldata order = orders[i];
+      require(order.side == Side.Buy, "not buy");
+      require(order.outcome == 0, "not YES");
+      require(order.price > 0 && order.price <= ONE, "bad price");
+      require(manager.getEventId(order.marketId) == eventId, "event mismatch");
+      require(manager.isNegRisk(order.marketId), "not neg risk");
+
+      _requireMarketOpen(order.marketId);
+      _validateOrder(order, signatures[i]);
+
+      bytes32 orderHash = hashOrder(order);
+      require(filledAmounts[orderHash] + fillAmount <= order.amount, "overfill");
+      require(order.minFillAmount == 0 || fillAmount >= order.minFillAmount, "below min fill");
+
+      // Check no duplicate markets
+      for (uint256 j = 0; j < i; j++) {
+        require(order.marketId != orders[j].marketId, "dup market");
+      }
+
+      priceSum += order.price;
+    }
+
+    require(priceSum >= ONE, "price sum < 1");
+
+    // Collect wcol from each buyer and calculate fees.
+    // Convention: last order = taker (charged takerBps), all others = makers (charged makerBps).
+    IERC20 collateral = manager.getMarketCollateral(orders[0].marketId);
+    uint256 totalFees;
+    uint256 totalCollected;
+    uint256 takerIdx = orders.length - 1;
+
+    uint256 collectedSoFar;
+    for (uint256 i = 0; i < orders.length; i++) {
+      // Taker (last) pays whatever remains to cover fillAmount; may be 0 when makers already covered it
+      uint256 notional;
+      if (i == orders.length - 1) {
+        notional = collectedSoFar >= fillAmount ? 0 : fillAmount - collectedSoFar;
+      } else {
+        notional = (fillAmount * orders[i].price) / ONE;
+        collectedSoFar += notional;
+        require(notional > 0, "notional 0");
+      }
+
+      uint256 fee;
+      if (i == takerIdx) {
+        (, uint16 takerBps) = IFeeModule(feeModule).getFeesAtPrice(orders[i].marketId, orders[i].price);
+        fee = (notional * takerBps) / BPS;
+      } else {
+        (uint16 makerBps, ) = IFeeModule(feeModule).getFeesAtPrice(orders[i].marketId, orders[i].price);
+        fee = (notional * makerBps) / BPS;
+      }
+      totalFees += fee;
+      totalCollected += notional;
+
+      collateral.safeTransferFrom(orders[i].trader, address(this), notional + fee);
+    }
+
+    // Use forceApprove to handle tokens like USDT that revert on non-zero-to-non-zero approve
+    collateral.forceApprove(negRiskAdapter, fillAmount);
+    INegRiskAdapter(negRiskAdapter).mintAllYesTokens(eventId, fillAmount, address(this));
+
+    // Distribute YES tokens to each buyer
+    for (uint256 i = 0; i < orders.length; i++) {
+      uint256 tokenId = conditionalTokens.getTokenId(orders[i].marketId, 0);
+      conditionalTokens.safeTransferFrom(address(this), orders[i].trader, tokenId, fillAmount, "");
+
+      bytes32 orderHash = hashOrder(orders[i]);
+      filledAmounts[orderHash] += fillAmount;
+
+      emit CrossMarketOrderFilled(orderHash, eventId, orders[i].marketId, fillAmount, filledAmounts[orderHash]);
+    }
+
+    // Accrue fees + any price surplus (totalCollected - fillAmount)
+    uint256 surplus = totalCollected > fillAmount ? totalCollected - fillAmount : 0;
+    uint256 totalToAccrue = totalFees + surplus;
+    if (totalToAccrue > 0) {
+      collateral.safeTransfer(feeModule, totalToAccrue);
+      IFeeModule(feeModule).accrueFees(address(collateral), totalToAccrue);
     }
   }
 

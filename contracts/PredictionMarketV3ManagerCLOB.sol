@@ -36,6 +36,8 @@ contract PredictionMarketV3ManagerCLOB is ReentrancyGuard, IMyriadMarketManager 
     address feeModule;
     address creator;
     address oracle;
+    bytes32 eventId;   // 0x0 for standalone markets
+    bool negRisk;      // true for neg risk event markets
   }
 
   struct CreateMarketParams {
@@ -57,6 +59,9 @@ contract PredictionMarketV3ManagerCLOB is ReentrancyGuard, IMyriadMarketManager 
   mapping(uint256 => Market) public markets;
   mapping(uint256 => uint256[2]) public voidedPayouts; // [outcome0Payout, outcome1Payout] in 1e18
 
+  /// @notice The NegRiskAdapter address, allowed to create neg risk markets.
+  address public negRiskAdapter;
+
   event MarketCreated(
     address indexed user,
     uint256 indexed marketId,
@@ -72,6 +77,11 @@ contract PredictionMarketV3ManagerCLOB is ReentrancyGuard, IMyriadMarketManager 
   constructor(AdminRegistry _registry, IERC20 _collateralToken) {
     registry = _registry;
     collateralToken = _collateralToken;
+  }
+
+  function setNegRiskAdapter(address _adapter) external {
+    require(registry.hasRole(registry.DEFAULT_ADMIN_ROLE(), msg.sender), "not admin");
+    negRiskAdapter = _adapter;
   }
 
   function createMarket(CreateMarketParams calldata params) external nonReentrant returns (uint256 marketId) {
@@ -108,10 +118,51 @@ contract PredictionMarketV3ManagerCLOB is ReentrancyGuard, IMyriadMarketManager 
     emit MarketCreated(msg.sender, marketId, params.question, params.image, address(collateralToken), params.executionMode);
   }
 
+  /// @notice Create a neg risk binary market with a custom collateral (wcol).
+  ///         Only callable by the registered NegRiskAdapter.
+  function createNegRiskMarket(
+    CreateMarketParams calldata params,
+    IERC20 collateralOverride,
+    bytes32 eventId
+  ) external nonReentrant returns (uint256 marketId) {
+    require(msg.sender == negRiskAdapter, "not adapter");
+    require(params.closesAt > block.timestamp, "close in past");
+    require(params.executionMode == ExecutionMode.CLOB, "neg risk must be CLOB");
+    require(marketIndex < type(uint128).max, "market id overflow");
+
+    marketId = marketIndex;
+    marketIndex += 1;
+
+    Market storage market = markets[marketId];
+    market.id = marketId;
+    market.collateral = collateralOverride;
+    market.closesAt = params.closesAt;
+    market.outcomes = 2;
+    market.question = params.question;
+    market.image = params.image;
+    market.state = MarketState.open;
+    market.resolvedOutcome = -3;
+    market.executionMode = params.executionMode;
+    market.outcome0TokenId = _getTokenId(marketId, 0);
+    market.outcome1TokenId = _getTokenId(marketId, 1);
+    market.feeModule = params.feeModule;
+    market.creator = msg.sender;
+    market.oracle = params.oracle;
+    market.eventId = eventId;
+    market.negRisk = true;
+
+    if (params.oracle != address(0) && params.oracleData.length > 0) {
+      IMarketOracle(params.oracle).initialize(marketId, params.oracleData);
+    }
+
+    emit MarketCreated(msg.sender, marketId, params.question, params.image, address(collateralOverride), params.executionMode);
+  }
+
   /// @notice Permissionless resolution via the market's oracle.
   function resolveMarket(uint256 marketId) external nonReentrant returns (int256 outcomeId) {
     Market storage market = markets[marketId];
     require(market.id == marketId, "!m");
+    require(!market.negRisk, "use resolveEvent for neg risk");
     require(getMarketState(marketId) == MarketState.closed, "!closed");
     require(market.state != MarketState.resolved, "resolved");
     require(market.oracle != address(0), "no oracle");
@@ -134,6 +185,8 @@ contract PredictionMarketV3ManagerCLOB is ReentrancyGuard, IMyriadMarketManager 
     Market storage market = markets[marketId];
     require(market.id == marketId, "!m");
     require(market.state != MarketState.resolved, "resolved");
+    // Neg risk markets must be resolved via NegRiskAdapter.resolveEvent
+    require(!market.negRisk || msg.sender == negRiskAdapter, "use resolveEvent");
 
     market.resolvedOutcome = outcomeId;
     market.state = MarketState.resolved;
@@ -158,6 +211,7 @@ contract PredictionMarketV3ManagerCLOB is ReentrancyGuard, IMyriadMarketManager 
     Market storage market = markets[marketId];
     require(market.id == marketId, "!m");
     require(market.state != MarketState.resolved, "resolved");
+    require(!market.negRisk, "use resolveEvent for neg risk");
 
     market.resolvedOutcome = -1;
     market.state = MarketState.resolved;
@@ -295,6 +349,16 @@ contract PredictionMarketV3ManagerCLOB is ReentrancyGuard, IMyriadMarketManager 
 
     outcome0Payout = voidedPayouts[marketId][0];
     outcome1Payout = voidedPayouts[marketId][1];
+  }
+
+  function isNegRisk(uint256 marketId) external view returns (bool) {
+    require(markets[marketId].id == marketId, "!m");
+    return markets[marketId].negRisk;
+  }
+
+  function getEventId(uint256 marketId) external view returns (bytes32) {
+    require(markets[marketId].id == marketId, "!m");
+    return markets[marketId].eventId;
   }
 
   function _getTokenId(uint256 marketId, uint256 outcome) internal pure returns (uint256) {
