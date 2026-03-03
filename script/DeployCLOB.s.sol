@@ -71,7 +71,5 @@ contract DeployCLOB is Script {
         console.log("ConditionalTokens:", address(conditionalTokens));
         console.log("FeeModule:", address(feeModule));
         console.log("Exchange:", address(exchange));
-        console.log("");
-        console.log("Next step: deploy oracles with DeployOracles.s.sol using CLOB_MANAGER=%s", address(manager));
     }
 }
