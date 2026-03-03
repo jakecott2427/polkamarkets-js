@@ -31,7 +31,7 @@ prompt_value "RPC_URL" "RPC_URL"
 prompt_value "CLOB_MANAGER" "CLOB_MANAGER address"
 
 read -r -p "Market ID to resolve: " MARKET_ID
-read -r -p "Winning outcome (0 = YES, 1 = NO, -1 = VOID): " OUTCOME
+read -r -p "Winning outcome (0 = outcome 0, 1 = outcome 1, -1 = VOID): " OUTCOME
 
 if [[ "${OUTCOME}" != "0" && "${OUTCOME}" != "1" && "${OUTCOME}" != "-1" ]]; then
   echo "Error: OUTCOME must be 0, 1, or -1"
@@ -42,14 +42,14 @@ export MARKET_ID
 export OUTCOME
 
 if [[ "${OUTCOME}" == "-1" ]]; then
-  read -r -p "YES payout % (0-100, NO gets the remainder) [50]: " YES_PAYOUT_PCT
-  YES_PAYOUT_PCT="${YES_PAYOUT_PCT:-50}"
-  export YES_PAYOUT_PCT
-  NO_PAYOUT_PCT=$((100 - YES_PAYOUT_PCT))
+  read -r -p "Outcome 0 payout % (0-100, outcome 1 gets the remainder) [50]: " OUTCOME0_PAYOUT_PCT
+  OUTCOME0_PAYOUT_PCT="${OUTCOME0_PAYOUT_PCT:-50}"
+  export OUTCOME0_PAYOUT_PCT
+  OUTCOME1_PAYOUT_PCT=$((100 - OUTCOME0_PAYOUT_PCT))
   echo ""
-  echo "Voiding market ${MARKET_ID} → YES ${YES_PAYOUT_PCT}% / NO ${NO_PAYOUT_PCT}%"
+  echo "Voiding market ${MARKET_ID} → outcome 0 ${OUTCOME0_PAYOUT_PCT}% / outcome 1 ${OUTCOME1_PAYOUT_PCT}%"
 else
-  outcome_label() { case "$1" in 0) echo "YES" ;; 1) echo "NO" ;; esac; }
+  outcome_label() { case "$1" in 0) echo "outcome 0" ;; 1) echo "outcome 1" ;; esac; }
   echo ""
   echo "Resolving market ${MARKET_ID} → outcome ${OUTCOME} ($(outcome_label "${OUTCOME}"))"
 fi
@@ -62,7 +62,7 @@ forge script script/ResolveMarket.s.sol:ResolveMarket \
 
 echo ""
 if [[ "${OUTCOME}" == "-1" ]]; then
-  echo "✅ Market ${MARKET_ID} voided (YES ${YES_PAYOUT_PCT}% / NO ${NO_PAYOUT_PCT}%)."
+  echo "✅ Market ${MARKET_ID} voided (outcome 0 ${OUTCOME0_PAYOUT_PCT}% / outcome 1 ${OUTCOME1_PAYOUT_PCT}%)."
 else
   echo "✅ Market ${MARKET_ID} resolved to $(outcome_label "${OUTCOME}")."
 fi
