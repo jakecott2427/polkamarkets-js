@@ -481,8 +481,11 @@ contract PredictionMarketCLOBTest is Test {
     MyriadCTFExchange.Order memory order1 = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 130);
     MyriadCTFExchange.Order memory order2 = _buildOrder(maker, marketId, 1, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 131);
 
+    bytes memory sig1 = _signOrder(order1, makerPk);
+    bytes memory sig2 = _signOrder(order2, makerPk);
+
     vm.expectRevert("self trade");
-    feeModule.matchOrdersWithFees(order1, _signOrder(order1, makerPk), order2, _signOrder(order2, makerPk), amount);
+    feeModule.matchOrdersWithFees(order1, sig1, order2, sig2, amount);
   }
 
   function testExpiredOrderReverts() public {
@@ -547,8 +550,11 @@ contract PredictionMarketCLOBTest is Test {
     MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 150);
     MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 151);
 
+    bytes memory makerSig = _signOrder(makerOrder, makerPk);
+    bytes memory takerSig = _signOrder(takerOrder, takerPk);
+
     vm.expectRevert("notional 0");
-    feeModule.matchOrdersWithFees(makerOrder, _signOrder(makerOrder, makerPk), takerOrder, _signOrder(takerOrder, takerPk), 1);
+    feeModule.matchOrdersWithFees(makerOrder, makerSig, takerOrder, takerSig, 1);
   }
 
   function testZeroFeeMarket() public {
@@ -651,8 +657,11 @@ contract PredictionMarketCLOBTest is Test {
     MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 190);
     MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 191);
 
+    bytes memory makerSig = _signOrder(makerOrder, makerPk);
+    bytes memory takerSig = _signOrder(takerOrder, takerPk);
+
     vm.expectRevert("market closed");
-    feeModule.matchOrdersWithFees(makerOrder, _signOrder(makerOrder, makerPk), takerOrder, _signOrder(takerOrder, takerPk), amount);
+    feeModule.matchOrdersWithFees(makerOrder, makerSig, takerOrder, takerSig, amount);
   }
 
   function testResolvedMarketReverts() public {
@@ -677,8 +686,11 @@ contract PredictionMarketCLOBTest is Test {
     MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 200);
     MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 201);
 
+    bytes memory makerSig = _signOrder(makerOrder, makerPk);
+    bytes memory takerSig = _signOrder(takerOrder, takerPk);
+
     vm.expectRevert("market closed");
-    feeModule.matchOrdersWithFees(makerOrder, _signOrder(makerOrder, makerPk), takerOrder, _signOrder(takerOrder, takerPk), amount);
+    feeModule.matchOrdersWithFees(makerOrder, makerSig, takerOrder, takerSig, amount);
   }
 
   function testAdminResolveInvalidOutcomeReverts() public {
@@ -863,8 +875,11 @@ contract PredictionMarketCLOBTest is Test {
     MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 240);
     MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 241);
 
+    bytes memory makerSig = _signOrder(makerOrder, makerPk);
+    bytes memory takerSig = _signOrder(takerOrder, takerPk);
+
     vm.expectRevert("fill 0");
-    feeModule.matchOrdersWithFees(makerOrder, _signOrder(makerOrder, makerPk), takerOrder, _signOrder(takerOrder, takerPk), 0);
+    feeModule.matchOrdersWithFees(makerOrder, makerSig, takerOrder, takerSig, 0);
   }
 
   function testDustFreeNotionals() public {
@@ -917,12 +932,15 @@ contract PredictionMarketCLOBTest is Test {
     MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 260);
     MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 261);
 
+    bytes memory makerSig = _signOrder(makerOrder, makerPk);
+    bytes memory takerSig = _signOrder(takerOrder, takerPk);
+
     vm.expectRevert("market paused");
-    feeModule.matchOrdersWithFees(makerOrder, _signOrder(makerOrder, makerPk), takerOrder, _signOrder(takerOrder, takerPk), amount);
+    feeModule.matchOrdersWithFees(makerOrder, makerSig, takerOrder, takerSig, amount);
 
     manager.pauseMarket(marketId, false);
 
-    feeModule.matchOrdersWithFees(makerOrder, _signOrder(makerOrder, makerPk), takerOrder, _signOrder(takerOrder, takerPk), amount);
+    feeModule.matchOrdersWithFees(makerOrder, makerSig, takerOrder, takerSig, amount);
   }
 
   // =========================================================================
