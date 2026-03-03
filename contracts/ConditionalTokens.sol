@@ -9,7 +9,7 @@ import "./AdminRegistry.sol";
 import "./IMyriadMarketManager.sol";
 
 /// @title ConditionalTokens
-/// @notice ERC1155 outcome positions for YES/NO markets.
+/// @notice ERC1155 outcome positions for binary (outcome 0 / outcome 1) markets.
 contract ConditionalTokens is ERC1155, ReentrancyGuard {
   using SafeERC20 for IERC20;
 
@@ -73,24 +73,24 @@ contract ConditionalTokens is ERC1155, ReentrancyGuard {
     int256 outcome = manager.getMarketOutcome(marketId);
     require(outcome == -1, "not voided");
 
-    (uint256 yesPayout, uint256 noPayout) = manager.getVoidedPayouts(marketId);
+    (uint256 outcome0Payout, uint256 outcome1Payout) = manager.getVoidedPayouts(marketId);
 
-    uint256 yesId = getTokenId(marketId, 0);
-    uint256 noId = getTokenId(marketId, 1);
-    uint256 yesBalance = balanceOf(msg.sender, yesId);
-    uint256 noBalance = balanceOf(msg.sender, noId);
-    require(yesBalance > 0 || noBalance > 0, "no balance");
+    uint256 outcome0Id = getTokenId(marketId, 0);
+    uint256 outcome1Id = getTokenId(marketId, 1);
+    uint256 outcome0Balance = balanceOf(msg.sender, outcome0Id);
+    uint256 outcome1Balance = balanceOf(msg.sender, outcome1Id);
+    require(outcome0Balance > 0 || outcome1Balance > 0, "no balance");
 
     uint256 totalPayout;
 
-    if (yesBalance > 0) {
-      _burn(msg.sender, yesId, yesBalance);
-      totalPayout += (yesBalance * yesPayout) / 1e18;
+    if (outcome0Balance > 0) {
+      _burn(msg.sender, outcome0Id, outcome0Balance);
+      totalPayout += (outcome0Balance * outcome0Payout) / 1e18;
     }
 
-    if (noBalance > 0) {
-      _burn(msg.sender, noId, noBalance);
-      totalPayout += (noBalance * noPayout) / 1e18;
+    if (outcome1Balance > 0) {
+      _burn(msg.sender, outcome1Id, outcome1Balance);
+      totalPayout += (outcome1Balance * outcome1Payout) / 1e18;
     }
 
     require(totalPayout > 0, "zero payout");
@@ -101,14 +101,14 @@ contract ConditionalTokens is ERC1155, ReentrancyGuard {
 
   /// @notice Exchange-only mint for mint-matched buys.
   function mintPositionsTo(
-    address yesRecipient,
-    address noRecipient,
+    address outcome0Recipient,
+    address outcome1Recipient,
     uint256 marketId,
     uint256 amount
   ) external onlyExchange {
     require(amount > 0, "amount 0");
-    _mint(yesRecipient, getTokenId(marketId, 0), amount, "");
-    _mint(noRecipient, getTokenId(marketId, 1), amount, "");
+    _mint(outcome0Recipient, getTokenId(marketId, 0), amount, "");
+    _mint(outcome1Recipient, getTokenId(marketId, 1), amount, "");
   }
 
   /// @notice Exchange-only merge that burns positions held by the exchange.

@@ -224,19 +224,19 @@ contract MyriadCTFExchange is ReentrancyGuard, ERC1155Holder, EIP712 {
     require(maker.outcome != taker.outcome, "same outcome");
     _requireMarketOpen(maker.marketId);
 
-    (Order calldata yesOrder, Order calldata noOrder) = maker.outcome == 0 ? (maker, taker) : (taker, maker);
-    require(yesOrder.price + noOrder.price == ONE, "price sum");
+    (Order calldata outcome0Order, Order calldata outcome1Order) = maker.outcome == 0 ? (maker, taker) : (taker, maker);
+    require(outcome0Order.price + outcome1Order.price == ONE, "price sum");
 
     IERC20 collateral = manager.getMarketCollateral(maker.marketId);
 
-    uint256 yesNotional = (fillAmount * yesOrder.price) / ONE;
-    uint256 noNotional = fillAmount - yesNotional;
-    require(yesNotional > 0 && noNotional > 0, "notional 0");
+    uint256 outcome0Notional = (fillAmount * outcome0Order.price) / ONE;
+    uint256 outcome1Notional = fillAmount - outcome0Notional;
+    require(outcome0Notional > 0 && outcome1Notional > 0, "notional 0");
 
-    collateral.safeTransferFrom(yesOrder.trader, address(conditionalTokens), yesNotional);
-    collateral.safeTransferFrom(noOrder.trader, address(conditionalTokens), noNotional);
+    collateral.safeTransferFrom(outcome0Order.trader, address(conditionalTokens), outcome0Notional);
+    collateral.safeTransferFrom(outcome1Order.trader, address(conditionalTokens), outcome1Notional);
 
-    conditionalTokens.mintPositionsTo(yesOrder.trader, noOrder.trader, maker.marketId, fillAmount);
+    conditionalTokens.mintPositionsTo(outcome0Order.trader, outcome1Order.trader, maker.marketId, fillAmount);
 
     totalProtocolFees = _collectFees(maker, taker, fillAmount, feeConfig, collateral);
   }
@@ -251,24 +251,24 @@ contract MyriadCTFExchange is ReentrancyGuard, ERC1155Holder, EIP712 {
     require(maker.outcome != taker.outcome, "same outcome");
     _requireMarketOpen(maker.marketId);
 
-    (Order calldata yesOrder, Order calldata noOrder) = maker.outcome == 0 ? (maker, taker) : (taker, maker);
-    require(yesOrder.price + noOrder.price == ONE, "price sum");
+    (Order calldata outcome0Order, Order calldata outcome1Order) = maker.outcome == 0 ? (maker, taker) : (taker, maker);
+    require(outcome0Order.price + outcome1Order.price == ONE, "price sum");
 
-    uint256 yesTokenId = conditionalTokens.getTokenId(maker.marketId, 0);
-    uint256 noTokenId = conditionalTokens.getTokenId(maker.marketId, 1);
+    uint256 outcome0TokenId = conditionalTokens.getTokenId(maker.marketId, 0);
+    uint256 outcome1TokenId = conditionalTokens.getTokenId(maker.marketId, 1);
 
-    conditionalTokens.safeTransferFrom(yesOrder.trader, address(this), yesTokenId, fillAmount, "");
-    conditionalTokens.safeTransferFrom(noOrder.trader, address(this), noTokenId, fillAmount, "");
+    conditionalTokens.safeTransferFrom(outcome0Order.trader, address(this), outcome0TokenId, fillAmount, "");
+    conditionalTokens.safeTransferFrom(outcome1Order.trader, address(this), outcome1TokenId, fillAmount, "");
 
     conditionalTokens.mergePositionsTo(address(this), maker.marketId, fillAmount);
 
     IERC20 collateral = manager.getMarketCollateral(maker.marketId);
 
-    uint256 yesNotional = (fillAmount * yesOrder.price) / ONE;
-    uint256 noNotional = fillAmount - yesNotional;
-    require(yesNotional > 0 && noNotional > 0, "notional 0");
+    uint256 outcome0Notional = (fillAmount * outcome0Order.price) / ONE;
+    uint256 outcome1Notional = fillAmount - outcome0Notional;
+    require(outcome0Notional > 0 && outcome1Notional > 0, "notional 0");
 
-    totalProtocolFees = _paySellerWithFees(maker, taker, fillAmount, feeConfig, collateral, yesOrder, noOrder, yesNotional, noNotional);
+    totalProtocolFees = _paySellerWithFees(maker, taker, fillAmount, feeConfig, collateral, outcome0Order, outcome1Order, outcome0Notional, outcome1Notional);
   }
 
   /// @dev Fee collection for mint matches — each buyer pays their own fee.
@@ -305,10 +305,10 @@ contract MyriadCTFExchange is ReentrancyGuard, ERC1155Holder, EIP712 {
     uint256 fillAmount,
     FeeConfig calldata feeConfig,
     IERC20 collateral,
-    Order calldata yesOrder,
-    Order calldata noOrder,
-    uint256 yesNotional,
-    uint256 noNotional
+    Order calldata outcome0Order,
+    Order calldata outcome1Order,
+    uint256 outcome0Notional,
+    uint256 outcome1Notional
   ) internal returns (uint256 totalProtocolFees) {
     uint256 makerNotional = (fillAmount * maker.price) / ONE;
     uint256 takerNotional = fillAmount - makerNotional;
@@ -320,8 +320,8 @@ contract MyriadCTFExchange is ReentrancyGuard, ERC1155Holder, EIP712 {
     address makerTrader = maker.trader;
     address takerTrader = taker.trader;
 
-    uint256 makerProceeds = makerTrader == yesOrder.trader ? yesNotional : noNotional;
-    uint256 takerProceeds = takerTrader == yesOrder.trader ? yesNotional : noNotional;
+    uint256 makerProceeds = makerTrader == outcome0Order.trader ? outcome0Notional : outcome1Notional;
+    uint256 takerProceeds = takerTrader == outcome0Order.trader ? outcome0Notional : outcome1Notional;
 
     require(makerProceeds >= makerFee, "maker fees exceed proceeds");
     makerProceeds -= makerFee;
@@ -329,8 +329,8 @@ contract MyriadCTFExchange is ReentrancyGuard, ERC1155Holder, EIP712 {
     require(takerProceeds >= takerFee, "taker fees exceed proceeds");
     takerProceeds -= takerFee;
 
-    collateral.safeTransfer(yesOrder.trader, makerTrader == yesOrder.trader ? makerProceeds : takerProceeds);
-    collateral.safeTransfer(noOrder.trader, makerTrader == noOrder.trader ? makerProceeds : takerProceeds);
+    collateral.safeTransfer(outcome0Order.trader, makerTrader == outcome0Order.trader ? makerProceeds : takerProceeds);
+    collateral.safeTransfer(outcome1Order.trader, makerTrader == outcome1Order.trader ? makerProceeds : takerProceeds);
 
     if (totalProtocolFees > 0) {
       collateral.safeTransfer(feeModule, totalProtocolFees);
