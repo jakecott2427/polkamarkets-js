@@ -382,22 +382,13 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
 
     exchange.matchCrossMarketOrders(orders, sigs, amount);
 
-    // Compute expected mintAmount after fee deduction
-    uint256 notional0 = (amount * price0) / ONE;
-    uint256 notional1 = (amount * price1) / ONE;
-    uint256 notional2 = amount - notional0 - notional1;
-    uint256 fee0 = (notional0 * 100) / BPS; // maker
-    uint256 fee1 = (notional1 * 100) / BPS; // maker
-    uint256 fee2 = (notional2 * 200) / BPS; // taker
-    uint256 mintAmount = amount - fee0 - fee1 - fee2;
-
-    // Each user receives mintAmount YES tokens (fees reduce shares, not payment)
-    assertEq(conditionalTokens.balanceOf(alice, conditionalTokens.getTokenId(marketIds[0], 0)), mintAmount);
-    assertEq(conditionalTokens.balanceOf(bob, conditionalTokens.getTokenId(marketIds[1], 0)), mintAmount);
-    assertEq(conditionalTokens.balanceOf(charlie, conditionalTokens.getTokenId(marketIds[2], 0)), mintAmount);
+    // Full shares minted — fees added on top of each party's notional
+    assertEq(conditionalTokens.balanceOf(alice, conditionalTokens.getTokenId(marketIds[0], 0)), amount);
+    assertEq(conditionalTokens.balanceOf(bob, conditionalTokens.getTokenId(marketIds[1], 0)), amount);
+    assertEq(conditionalTokens.balanceOf(charlie, conditionalTokens.getTokenId(marketIds[2], 0)), amount);
 
     bytes32 hash0 = exchange.hashOrder(order0);
-    assertEq(exchange.filledAmounts(hash0), mintAmount);
+    assertEq(exchange.filledAmounts(hash0), amount);
   }
 
   function testCrossMarketMatchPriceSumNot1Reverts() public {
@@ -474,22 +465,19 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     uint256 bobSpent = bobBefore - wcol.balanceOf(bob);
     uint256 charlieSpent = charlieBefore - wcol.balanceOf(charlie);
 
-    // Each buyer pays only their notional — fees are deducted from the pool
     uint256 aliceNotional = (amount * price0) / ONE;
-    assertEq(aliceSpent, aliceNotional, "alice pays only notional");
+    uint256 aliceFee = (aliceNotional * 100) / BPS;
+    assertEq(aliceSpent, aliceNotional + aliceFee, "alice pays notional + fee");
 
     uint256 bobNotional = (amount * price1) / ONE;
-    assertEq(bobSpent, bobNotional, "bob pays only notional");
+    uint256 bobFee = (bobNotional * 100) / BPS;
+    assertEq(bobSpent, bobNotional + bobFee, "bob pays notional + fee");
 
     uint256 charlieNotional = amount - aliceNotional - bobNotional;
-    assertEq(charlieSpent, charlieNotional, "charlie pays only notional");
-
-    // Fees are deducted from the pool and sent to feeModule
-    uint256 aliceFee = (aliceNotional * 100) / BPS;
-    uint256 bobFee = (bobNotional * 100) / BPS;
     uint256 charlieFee = (charlieNotional * 300) / BPS;
-    uint256 totalFees = aliceFee + bobFee + charlieFee;
+    assertEq(charlieSpent, charlieNotional + charlieFee, "charlie pays notional + fee");
 
+    uint256 totalFees = aliceFee + bobFee + charlieFee;
     assertEq(wcol.balanceOf(address(feeModule)), totalFees, "feeModule received fees");
   }
 

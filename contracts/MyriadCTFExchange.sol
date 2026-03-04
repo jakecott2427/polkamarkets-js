@@ -32,7 +32,8 @@ interface INegRiskAdapter {
 
 /// @title MyriadCTFExchange
 /// @notice On-chain settlement engine for matched signed orders with partial fill support.
-///         Fees are deducted from trade proceeds (never added on top of the signed price).
+///         Buyer fees are added on top of notional; seller fees are deducted from proceeds.
+///         Shares always transfer in full (fillAmount), never reduced by fees.
 contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, PausableUpgradeable, ERC1155Holder, UUPSUpgradeable, EIP712Upgradeable {
   using SafeERC20 for IERC20;
 
@@ -239,20 +240,20 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
 
     require(priceSum >= ONE, "price sum < 1");
 
-    // Collect wcol from each buyer; fees are deducted from contributions.
+    // Collect wcol from each buyer: notional + fee.
     // Convention: last order = taker, all others = makers.
     IERC20 collateral = manager.getMarketCollateral(orders[0].marketId);
     uint256 totalFees;
     uint256 takerIdx = orders.length - 1;
 
-    uint256 collectedSoFar;
+    uint256 notionalSoFar;
     for (uint256 i = 0; i < orders.length; i++) {
       uint256 notional;
       if (i == orders.length - 1) {
-        notional = collectedSoFar >= fillAmount ? 0 : fillAmount - collectedSoFar;
+        notional = notionalSoFar >= fillAmount ? 0 : fillAmount - notionalSoFar;
       } else {
         notional = (fillAmount * orders[i].price) / ONE;
-        collectedSoFar += notional;
+        notionalSoFar += notional;
         require(notional > 0, "notional 0");
       }
 
@@ -266,33 +267,29 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
       }
       totalFees += fee;
 
-      // Each buyer pays their notional only — fees are deducted from the pool
-      collateral.safeTransferFrom(orders[i].trader, address(this), notional);
+      // Each buyer pays notional + fee
+      collateral.safeTransferFrom(orders[i].trader, address(this), notional + fee);
     }
 
-    // Mint amount = total collected - fees
-    uint256 mintAmount = fillAmount - totalFees;
-    require(mintAmount > 0, "fees consume entire fill");
+    // Mint full fillAmount shares
+    collateral.forceApprove(negRiskAdapter, fillAmount);
+    INegRiskAdapter(negRiskAdapter).mintAllYesTokens(eventId, fillAmount, address(this));
 
-    collateral.forceApprove(negRiskAdapter, mintAmount);
-    INegRiskAdapter(negRiskAdapter).mintAllYesTokens(eventId, mintAmount, address(this));
-
-    // Distribute YES tokens (mintAmount per outcome) to each buyer
+    // Distribute YES tokens (fillAmount per outcome) to each buyer
     for (uint256 i = 0; i < orders.length; i++) {
       uint256 tokenId = conditionalTokens.getTokenId(orders[i].marketId, 0);
-      conditionalTokens.safeTransferFrom(address(this), orders[i].trader, tokenId, mintAmount, "");
+      conditionalTokens.safeTransferFrom(address(this), orders[i].trader, tokenId, fillAmount, "");
 
       bytes32 orderHash = hashOrder(orders[i]);
-      filledAmounts[orderHash] += mintAmount;
+      filledAmounts[orderHash] += fillAmount;
 
-      emit CrossMarketOrderFilled(orderHash, eventId, orders[i].marketId, mintAmount, filledAmounts[orderHash]);
+      emit CrossMarketOrderFilled(orderHash, eventId, orders[i].marketId, fillAmount, filledAmounts[orderHash]);
     }
 
-    // Accrue fees + any price surplus
-    uint256 surplus = totalFees; // totalCollected - mintAmount = totalFees
-    if (surplus > 0) {
-      collateral.safeTransfer(feeModule, surplus);
-      IFeeModule(feeModule).accrueFees(address(collateral), surplus);
+    // Accrue fees
+    if (totalFees > 0) {
+      collateral.safeTransfer(feeModule, totalFees);
+      IFeeModule(feeModule).accrueFees(address(collateral), totalFees);
     }
   }
 
@@ -355,34 +352,16 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
     require(maker.minFillAmount == 0 || fillAmount >= maker.minFillAmount, "below maker min fill");
     require(taker.minFillAmount == 0 || fillAmount >= taker.minFillAmount, "below taker min fill");
 
-    uint256 makerFilled;
-    uint256 takerFilled;
-
     if (maker.side != taker.side) {
-      uint256 actualShares;
-      (totalFees, actualShares) = _settleDirectMatch(maker, taker, fillAmount, feeConfig);
-      // Buyer's order capacity consumed by fillAmount (collateral commitment).
-      // Seller's order capacity consumed by actualShares (tokens transferred).
-      if (maker.side == Side.Buy) {
-        makerFilled = fillAmount;
-        takerFilled = actualShares;
-      } else {
-        makerFilled = actualShares;
-        takerFilled = fillAmount;
-      }
+      (totalFees, ) = _settleDirectMatch(maker, taker, fillAmount, feeConfig);
     } else if (maker.side == Side.Buy) {
-      uint256 actualShares;
-      (totalFees, actualShares) = _settleMintMatch(maker, taker, fillAmount, feeConfig);
-      makerFilled = actualShares;
-      takerFilled = actualShares;
+      (totalFees, ) = _settleMintMatch(maker, taker, fillAmount, feeConfig);
     } else {
       totalFees = _settleMergeMatch(maker, taker, fillAmount, feeConfig);
-      makerFilled = fillAmount;
-      takerFilled = fillAmount;
     }
 
-    filledAmounts[makerHash] += makerFilled;
-    filledAmounts[takerHash] += takerFilled;
+    filledAmounts[makerHash] += fillAmount;
+    filledAmounts[takerHash] += fillAmount;
 
     emit OrdersMatched(makerHash, takerHash, maker.marketId, fillAmount, filledAmounts[makerHash], filledAmounts[takerHash]);
   }
@@ -406,9 +385,8 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
   }
 
   /// @dev Direct match: BUY vs SELL (same outcome).
-  ///      1. Buyer fee is deducted from the gross notional → reduces effective buy.
-  ///      2. Fewer shares transfer (effectiveNotional / price).
-  ///      3. Seller fee is deducted from the effective notional → reduces seller proceeds.
+  ///      Buyer pays notional + buyerFee, receives full fillAmount shares.
+  ///      Seller provides fillAmount shares, receives notional - sellerFee.
   function _settleDirectMatch(
     Order calldata maker,
     Order calldata taker,
@@ -438,32 +416,26 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
     uint256 buyerFeeBps = maker.side == Side.Buy ? feeConfig.makerFeeBps : feeConfig.takerFeeBps;
     uint256 sellerFeeBps = maker.side == Side.Sell ? feeConfig.makerFeeBps : feeConfig.takerFeeBps;
 
-    // 1. Buyer fee: deducted from gross notional → reduces effective purchase
     uint256 buyerFee = (notional * buyerFeeBps) / BPS;
-    uint256 effectiveNotional = notional - buyerFee;
-
-    // 2. Actual shares = effectiveNotional / price
-    actualShares = (effectiveNotional * ONE) / executionPrice;
-    require(actualShares > 0, "actualShares 0");
-
-    // 3. Seller fee: deducted from effective notional → reduces seller proceeds
-    uint256 sellerFee = (effectiveNotional * sellerFeeBps) / BPS;
-    uint256 sellerProceeds = effectiveNotional - sellerFee;
+    uint256 sellerFee = (notional * sellerFeeBps) / BPS;
+    uint256 sellerProceeds = notional - sellerFee;
 
     totalProtocolFees = buyerFee + sellerFee;
+    actualShares = fillAmount;
 
-    // Buyer pays the full gross notional
-    collateral.safeTransferFrom(buyer, address(this), notional);
+    // Buyer pays notional + fee
+    collateral.safeTransferFrom(buyer, address(this), notional + buyerFee);
 
-    // Only actualShares transfer (fewer than fillAmount)
+    // Full shares transfer
     conditionalTokens.safeTransferFrom(
       seller,
       buyer,
       conditionalTokens.getTokenId(maker.marketId, maker.outcome),
-      actualShares,
+      fillAmount,
       ""
     );
 
+    // Seller receives notional - fee
     collateral.safeTransfer(seller, sellerProceeds);
 
     if (totalProtocolFees > 0) {
@@ -471,10 +443,9 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
     }
   }
 
-  /// @dev Mint match: two BUY orders for opposite outcomes. Each buyer pays their
-  ///      notional share; fees are deducted from the pool before splitting, so
-  ///      both buyers receive (fillAmount - totalFees) shares instead of fillAmount.
-  ///      Returns (totalFees, actualSharesMinted).
+  /// @dev Mint match: two BUY orders for opposite outcomes.
+  ///      Each buyer pays their notional + fee. Full fillAmount shares are minted
+  ///      and distributed. Fees go to FeeModule separately.
   function _settleMintMatch(
     Order calldata maker,
     Order calldata taker,
@@ -490,39 +461,35 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
 
     IERC20 collateral = manager.getMarketCollateral(maker.marketId);
 
-    uint256 outcome0Notional = (fillAmount * outcome0Order.price) / ONE;
-    uint256 outcome1Notional = fillAmount - outcome0Notional;
-    require(outcome0Notional > 0 && outcome1Notional > 0, "notional 0");
-
     uint256 makerNotional = (fillAmount * maker.price) / ONE;
     uint256 takerNotional = fillAmount - makerNotional;
+    require(makerNotional > 0 && takerNotional > 0, "notional 0");
+
     uint256 makerFee = (makerNotional * feeConfig.makerFeeBps) / BPS;
     uint256 takerFee = (takerNotional * feeConfig.takerFeeBps) / BPS;
     totalProtocolFees = makerFee + takerFee;
 
-    // Each buyer pays their notional (no extra for fees)
-    collateral.safeTransferFrom(outcome0Order.trader, address(this), outcome0Notional);
-    collateral.safeTransferFrom(outcome1Order.trader, address(this), outcome1Notional);
+    // Each buyer pays notional + fee
+    collateral.safeTransferFrom(maker.trader, address(this), makerNotional + makerFee);
+    collateral.safeTransferFrom(taker.trader, address(this), takerNotional + takerFee);
 
-    // Deduct fees before splitting — fewer shares are created
-    actualShares = fillAmount - totalProtocolFees;
-    require(actualShares > 0, "fees consume entire fill");
+    // Full shares minted
+    actualShares = fillAmount;
 
-    // Approve CT and split to get outcome tokens
-    collateral.forceApprove(address(conditionalTokens), actualShares);
-    conditionalTokens.splitPosition(maker.marketId, actualShares);
+    collateral.forceApprove(address(conditionalTokens), fillAmount);
+    conditionalTokens.splitPosition(maker.marketId, fillAmount);
 
-    // Distribute: each buyer receives actualShares of their outcome token
+    // Each buyer receives fillAmount shares of their outcome token
     conditionalTokens.safeTransferFrom(
       address(this), outcome0Order.trader,
-      conditionalTokens.getTokenId(maker.marketId, 0), actualShares, ""
+      conditionalTokens.getTokenId(maker.marketId, 0), fillAmount, ""
     );
     conditionalTokens.safeTransferFrom(
       address(this), outcome1Order.trader,
-      conditionalTokens.getTokenId(maker.marketId, 1), actualShares, ""
+      conditionalTokens.getTokenId(maker.marketId, 1), fillAmount, ""
     );
 
-    // Send fees to FeeModule
+    // Fees to FeeModule
     if (totalProtocolFees > 0) {
       collateral.safeTransfer(feeModule, totalProtocolFees);
     }
