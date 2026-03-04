@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
@@ -10,15 +12,10 @@ import "./IMarketOracle.sol";
 import "./IMyriadMarketManager.sol";
 
 /// @title PredictionMarketV3ManagerCLOB
-/// @notice Market lifecycle registry for AMM and CLOB markets.
+/// @notice Market lifecycle registry for CLOB markets.
 ///         Resolution is delegated to pluggable oracle contracts that implement IMarketOracle.
-contract PredictionMarketV3ManagerCLOB is ReentrancyGuard, IMyriadMarketManager {
+contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardUpgradeable, UUPSUpgradeable, IMyriadMarketManager {
   using SafeERC20 for IERC20;
-
-  enum ExecutionMode {
-    AMM,
-    CLOB
-  }
 
   struct Market {
     uint256 id;
@@ -30,7 +27,6 @@ contract PredictionMarketV3ManagerCLOB is ReentrancyGuard, IMyriadMarketManager 
     MarketState state;
     int256 resolvedOutcome;
     bool paused;
-    ExecutionMode executionMode;
     uint256 outcome0TokenId;
     uint256 outcome1TokenId;
     address feeModule;
@@ -44,7 +40,6 @@ contract PredictionMarketV3ManagerCLOB is ReentrancyGuard, IMyriadMarketManager 
     uint256 closesAt;
     string question;
     string image;
-    ExecutionMode executionMode;
     address feeModule;
     address oracle;
     bytes oracleData;
@@ -52,10 +47,10 @@ contract PredictionMarketV3ManagerCLOB is ReentrancyGuard, IMyriadMarketManager 
 
   uint256 private constant ONE = 1e18;
 
-  AdminRegistry public immutable registry;
-  IERC20 public immutable collateralToken;
+  AdminRegistry public registry;
+  IERC20 public collateralToken;
 
-  uint256 public marketIndex = 1;
+  uint256 public marketIndex;
   mapping(uint256 => Market) public markets;
   mapping(uint256 => uint256[2]) public voidedPayouts; // [outcome0Payout, outcome1Payout] in 1e18
 
@@ -67,16 +62,28 @@ contract PredictionMarketV3ManagerCLOB is ReentrancyGuard, IMyriadMarketManager 
     uint256 indexed marketId,
     string question,
     string image,
-    address collateral,
-    ExecutionMode executionMode
+    address collateral
   );
   event MarketResolved(address indexed user, uint256 indexed marketId, int256 outcomeId, uint256 timestamp);
   event MarketPaused(address indexed user, uint256 indexed marketId, bool paused, uint256 timestamp);
   event MarketOracleUpdated(uint256 indexed marketId, address oldOracle, address newOracle);
 
-  constructor(AdminRegistry _registry, IERC20 _collateralToken) {
+  /// @custom:oz-upgrades-unsafe-allow constructor
+  constructor() {
+    _disableInitializers();
+  }
+
+  function initialize(AdminRegistry _registry, IERC20 _collateralToken) public initializer {
+    __ReentrancyGuard_init();
+    __UUPSUpgradeable_init();
+
     registry = _registry;
     collateralToken = _collateralToken;
+    marketIndex = 1;
+  }
+
+  function _authorizeUpgrade(address) internal view override {
+    require(registry.hasRole(registry.DEFAULT_ADMIN_ROLE(), msg.sender), "not admin");
   }
 
   function setNegRiskAdapter(address _adapter) external {
@@ -87,9 +94,6 @@ contract PredictionMarketV3ManagerCLOB is ReentrancyGuard, IMyriadMarketManager 
   function createMarket(CreateMarketParams calldata params) external nonReentrant returns (uint256 marketId) {
     require(registry.hasRole(registry.MARKET_ADMIN_ROLE(), msg.sender), "not market admin");
     require(params.closesAt > block.timestamp, "close in past");
-
-    // Prevent token ID collisions: getTokenId() uses (marketId << 1), which
-    // overflows if marketId >= 2^255. type(uint128).max is a safe practical limit.
     require(marketIndex < type(uint128).max, "market id overflow");
 
     marketId = marketIndex;
@@ -104,7 +108,6 @@ contract PredictionMarketV3ManagerCLOB is ReentrancyGuard, IMyriadMarketManager 
     market.image = params.image;
     market.state = MarketState.open;
     market.resolvedOutcome = -3;
-    market.executionMode = params.executionMode;
     market.outcome0TokenId = _getTokenId(marketId, 0);
     market.outcome1TokenId = _getTokenId(marketId, 1);
     market.feeModule = params.feeModule;
@@ -115,7 +118,7 @@ contract PredictionMarketV3ManagerCLOB is ReentrancyGuard, IMyriadMarketManager 
       IMarketOracle(params.oracle).initialize(marketId, params.oracleData);
     }
 
-    emit MarketCreated(msg.sender, marketId, params.question, params.image, address(collateralToken), params.executionMode);
+    emit MarketCreated(msg.sender, marketId, params.question, params.image, address(collateralToken));
   }
 
   /// @notice Create a neg risk binary market with a custom collateral (wcol).
@@ -127,7 +130,6 @@ contract PredictionMarketV3ManagerCLOB is ReentrancyGuard, IMyriadMarketManager 
   ) external nonReentrant returns (uint256 marketId) {
     require(msg.sender == negRiskAdapter, "not adapter");
     require(params.closesAt > block.timestamp, "close in past");
-    require(params.executionMode == ExecutionMode.CLOB, "neg risk must be CLOB");
     require(marketIndex < type(uint128).max, "market id overflow");
 
     marketId = marketIndex;
@@ -142,7 +144,6 @@ contract PredictionMarketV3ManagerCLOB is ReentrancyGuard, IMyriadMarketManager 
     market.image = params.image;
     market.state = MarketState.open;
     market.resolvedOutcome = -3;
-    market.executionMode = params.executionMode;
     market.outcome0TokenId = _getTokenId(marketId, 0);
     market.outcome1TokenId = _getTokenId(marketId, 1);
     market.feeModule = params.feeModule;
@@ -155,7 +156,7 @@ contract PredictionMarketV3ManagerCLOB is ReentrancyGuard, IMyriadMarketManager 
       IMarketOracle(params.oracle).initialize(marketId, params.oracleData);
     }
 
-    emit MarketCreated(msg.sender, marketId, params.question, params.image, address(collateralOverride), params.executionMode);
+    emit MarketCreated(msg.sender, marketId, params.question, params.image, address(collateralOverride));
   }
 
   /// @notice Permissionless resolution via the market's oracle.
@@ -185,7 +186,6 @@ contract PredictionMarketV3ManagerCLOB is ReentrancyGuard, IMyriadMarketManager 
     Market storage market = markets[marketId];
     require(market.id == marketId, "!m");
     require(market.state != MarketState.resolved, "resolved");
-    // Neg risk markets must be resolved via NegRiskAdapter.resolveEvent
     require(!market.negRisk || msg.sender == negRiskAdapter, "use resolveEvent");
 
     market.resolvedOutcome = outcomeId;
@@ -222,9 +222,7 @@ contract PredictionMarketV3ManagerCLOB is ReentrancyGuard, IMyriadMarketManager 
     return -1;
   }
 
-  /// @notice Update the oracle address for a market (e.g. to fix a misconfigured oracle).
-  /// @param newOracle The new oracle address. Pass address(0) to remove the oracle.
-  /// @param oracleData Optional ABI-encoded data to initialize the new oracle.
+  /// @notice Update the oracle address for a market.
   function updateMarketOracle(
     uint256 marketId,
     address newOracle,
@@ -261,7 +259,6 @@ contract PredictionMarketV3ManagerCLOB is ReentrancyGuard, IMyriadMarketManager 
     view
     returns (
       MarketState state,
-      ExecutionMode executionMode,
       IERC20 collateral,
       uint256 closesAt,
       uint256 outcome0TokenId,
@@ -275,7 +272,6 @@ contract PredictionMarketV3ManagerCLOB is ReentrancyGuard, IMyriadMarketManager 
 
     return (
       getMarketState(marketId),
-      market.executionMode,
       market.collateral,
       market.closesAt,
       market.outcome0TokenId,
@@ -306,7 +302,7 @@ contract PredictionMarketV3ManagerCLOB is ReentrancyGuard, IMyriadMarketManager 
     return market.collateral;
   }
 
-  function getMarketOutcome(uint256 marketId) external view override returns (int256) {
+  function getMarketResolvedOutcome(uint256 marketId) external view override returns (int256) {
     Market storage market = markets[marketId];
     require(market.id == marketId, "!m");
 
@@ -335,13 +331,6 @@ contract PredictionMarketV3ManagerCLOB is ReentrancyGuard, IMyriadMarketManager 
     return market.paused;
   }
 
-  function getMarketExecutionMode(uint256 marketId) external view override returns (uint8) {
-    Market storage market = markets[marketId];
-    require(market.id == marketId, "!m");
-
-    return uint8(market.executionMode);
-  }
-
   function getVoidedPayouts(uint256 marketId) external view override returns (uint256 outcome0Payout, uint256 outcome1Payout) {
     Market storage market = markets[marketId];
     require(market.id == marketId, "!m");
@@ -359,6 +348,11 @@ contract PredictionMarketV3ManagerCLOB is ReentrancyGuard, IMyriadMarketManager 
   function getEventId(uint256 marketId) external view returns (bytes32) {
     require(markets[marketId].id == marketId, "!m");
     return markets[marketId].eventId;
+  }
+
+  /// @notice Returns the total number of markets created (next id to be assigned).
+  function marketCount() external view returns (uint256) {
+    return marketIndex;
   }
 
   function _getTokenId(uint256 marketId, uint256 outcome) internal pure returns (uint256) {

@@ -25,6 +25,7 @@ contract NegRiskAdapter is ReentrancyGuard, ERC1155Holder {
     bool resolved;
     int256 winningIndex;   // -1 = no winner ("Other"), 0..N-1 = specific outcome
     uint256[] marketIds;
+    string question;       // parent event question (e.g. "Who will win the election?")
   }
 
   // ─── State ───────────────────────────────────────────────────────────
@@ -102,12 +103,15 @@ contract NegRiskAdapter is ReentrancyGuard, ERC1155Holder {
   // ─── Event lifecycle ─────────────────────────────────────────────────
 
   /// @notice Create a neg risk event with all binary markets in one tx.
+  /// @param question The parent event question (e.g. "Who will win the election?").
   /// @param marketParams Array of CreateMarketParams, one per outcome.
   /// @return eventId The keccak256 identifier for this event.
   function createEvent(
+    string calldata question,
     PredictionMarketV3ManagerCLOB.CreateMarketParams[] calldata marketParams
   ) external nonReentrant returns (bytes32 eventId) {
     require(registry.hasRole(registry.MARKET_ADMIN_ROLE(), msg.sender), "not market admin");
+    require(bytes(question).length > 0, "empty question");
     require(marketParams.length >= 2, "need >= 2 outcomes");
     require(marketParams.length <= 256, "max 256 outcomes");
 
@@ -119,6 +123,7 @@ contract NegRiskAdapter is ReentrancyGuard, ERC1155Holder {
     Event storage evt = _events[eventId];
     evt.outcomeCount = marketParams.length;
     evt.winningIndex = -2; // unresolved sentinel
+    evt.question = question;
 
     for (uint256 i = 0; i < marketParams.length; i++) {
       uint256 marketId = manager.createNegRiskMarket(
@@ -339,7 +344,7 @@ contract NegRiskAdapter is ReentrancyGuard, ERC1155Holder {
     // Redeem NO positions from all markets where NO won
     for (uint256 i = 0; i < n; i++) {
       uint256 marketId = evt.marketIds[i];
-      int256 outcome = manager.getMarketOutcome(marketId);
+      int256 outcome = manager.getMarketResolvedOutcome(marketId);
 
       if (outcome == 1) {
         // NO won — redeem our NO tokens
@@ -380,10 +385,11 @@ contract NegRiskAdapter is ReentrancyGuard, ERC1155Holder {
     uint256 outcomeCount,
     bool resolved,
     int256 winningIndex,
-    uint256[] memory marketIds
+    uint256[] memory marketIds,
+    string memory question
   ) {
     Event storage evt = _events[eventId];
-    return (evt.outcomeCount, evt.resolved, evt.winningIndex, evt.marketIds);
+    return (evt.outcomeCount, evt.resolved, evt.winningIndex, evt.marketIds, evt.question);
   }
 
   function getEventMarkets(bytes32 eventId) external view returns (uint256[] memory) {

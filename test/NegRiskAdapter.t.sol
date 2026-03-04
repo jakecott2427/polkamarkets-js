@@ -4,12 +4,14 @@ pragma solidity ^0.8.26;
 import "forge-std/Test.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC1155/utils/ERC1155Holder.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 import "../contracts/AdminRegistry.sol";
 import "../contracts/PredictionMarketV3ManagerCLOB.sol";
 import "../contracts/ConditionalTokens.sol";
 import "../contracts/MyriadCTFExchange.sol";
 import "../contracts/FeeModule.sol";
+import "../contracts/IMyriadMarketManager.sol";
 import "../contracts/WrappedCollateral.sol";
 import "../contracts/NegRiskAdapter.sol";
 import "../contracts/IMarketOracle.sol";
@@ -54,17 +56,25 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     collateral = new MockERC20NR();
 
     registry = new AdminRegistry(admin);
-    manager = new PredictionMarketV3ManagerCLOB(registry, IERC20(address(collateral)));
+    PredictionMarketV3ManagerCLOB managerImpl = new PredictionMarketV3ManagerCLOB();
+    manager = PredictionMarketV3ManagerCLOB(address(new ERC1967Proxy(
+      address(managerImpl),
+      abi.encodeCall(PredictionMarketV3ManagerCLOB.initialize, (registry, IERC20(address(collateral))))
+    )));
     conditionalTokens = new ConditionalTokens(registry, IMyriadMarketManager(address(manager)));
-    feeModule = new FeeModule(registry, treasury);
-    exchange = new MyriadCTFExchange(
-      IMyriadMarketManager(address(manager)),
-      conditionalTokens,
-      address(feeModule),
-      registry
-    );
+    FeeModule feeModuleImpl = new FeeModule();
+    feeModule = FeeModule(address(new ERC1967Proxy(
+      address(feeModuleImpl),
+      abi.encodeCall(FeeModule.initialize, (registry, treasury))
+    )));
+    MyriadCTFExchange exchangeImpl = new MyriadCTFExchange();
+    exchange = MyriadCTFExchange(address(new ERC1967Proxy(
+      address(exchangeImpl),
+      abi.encodeCall(MyriadCTFExchange.initialize, (
+        IMyriadMarketManager(address(manager)), conditionalTokens, address(feeModule), registry
+      ))
+    )));
 
-    conditionalTokens.setExchange(address(exchange));
     feeModule.setExchange(address(exchange));
 
     registry.grantRole(registry.MARKET_ADMIN_ROLE(), admin);
@@ -104,7 +114,7 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
 
     assertEq(marketIds.length, 3);
 
-    (uint256 outcomeCount, bool resolved, int256 winningIndex, uint256[] memory ids) = adapter.getEvent(eventId);
+    (uint256 outcomeCount, bool resolved, int256 winningIndex, uint256[] memory ids,) = adapter.getEvent(eventId);
     assertEq(outcomeCount, 3);
     assertFalse(resolved);
     assertEq(winningIndex, -2); // unresolved sentinel
@@ -122,7 +132,7 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
       new PredictionMarketV3ManagerCLOB.CreateMarketParams[](1);
     params[0] = _mkParam("Only");
     vm.expectRevert("need >= 2 outcomes");
-    adapter.createEvent(params);
+    adapter.createEvent("Duplicate event", params);
   }
 
   // =========================================================================
@@ -254,16 +264,16 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     // Resolve: outcome 1 wins
     adapter.resolveEvent(eventId, 1);
 
-    (,bool resolved, int256 winningIndex,) = adapter.getEvent(eventId);
+    (,bool resolved, int256 winningIndex,,) = adapter.getEvent(eventId);
     assertTrue(resolved);
     assertEq(winningIndex, 1);
 
     // Market 0 should be resolved with outcome 1 (NO wins)
-    assertEq(manager.getMarketOutcome(marketIds[0]), 1);
+    assertEq(manager.getMarketResolvedOutcome(marketIds[0]), 1);
     // Market 1 should be resolved with outcome 0 (YES wins)
-    assertEq(manager.getMarketOutcome(marketIds[1]), 0);
+    assertEq(manager.getMarketResolvedOutcome(marketIds[1]), 0);
     // Market 2 should be resolved with outcome 1 (NO wins)
-    assertEq(manager.getMarketOutcome(marketIds[2]), 1);
+    assertEq(manager.getMarketResolvedOutcome(marketIds[2]), 1);
 
     // Alice redeems YES(1) → gets collateral
     uint256 yesTokenId1 = conditionalTokens.getTokenId(marketIds[1], 0);
@@ -307,7 +317,7 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
 
     // All markets should resolve with outcome 1 (NO wins)
     for (uint256 i = 0; i < 3; i++) {
-      assertEq(manager.getMarketOutcome(marketIds[i]), 1);
+      assertEq(manager.getMarketResolvedOutcome(marketIds[i]), 1);
     }
 
     // Bob's YES(0) is worthless, but NO(0) is redeemable
@@ -372,14 +382,22 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
 
     exchange.matchCrossMarketOrders(orders, sigs, amount);
 
-    // Each user should have YES tokens for their outcome
-    assertEq(conditionalTokens.balanceOf(alice, conditionalTokens.getTokenId(marketIds[0], 0)), amount);
-    assertEq(conditionalTokens.balanceOf(bob, conditionalTokens.getTokenId(marketIds[1], 0)), amount);
-    assertEq(conditionalTokens.balanceOf(charlie, conditionalTokens.getTokenId(marketIds[2], 0)), amount);
+    // Compute expected mintAmount after fee deduction
+    uint256 notional0 = (amount * price0) / ONE;
+    uint256 notional1 = (amount * price1) / ONE;
+    uint256 notional2 = amount - notional0 - notional1;
+    uint256 fee0 = (notional0 * 100) / BPS; // maker
+    uint256 fee1 = (notional1 * 100) / BPS; // maker
+    uint256 fee2 = (notional2 * 200) / BPS; // taker
+    uint256 mintAmount = amount - fee0 - fee1 - fee2;
 
-    // Orders should be partially or fully filled
+    // Each user receives mintAmount YES tokens (fees reduce shares, not payment)
+    assertEq(conditionalTokens.balanceOf(alice, conditionalTokens.getTokenId(marketIds[0], 0)), mintAmount);
+    assertEq(conditionalTokens.balanceOf(bob, conditionalTokens.getTokenId(marketIds[1], 0)), mintAmount);
+    assertEq(conditionalTokens.balanceOf(charlie, conditionalTokens.getTokenId(marketIds[2], 0)), mintAmount);
+
     bytes32 hash0 = exchange.hashOrder(order0);
-    assertEq(exchange.filledAmounts(hash0), amount);
+    assertEq(exchange.filledAmounts(hash0), mintAmount);
   }
 
   function testCrossMarketMatchPriceSumNot1Reverts() public {
@@ -456,20 +474,23 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     uint256 bobSpent = bobBefore - wcol.balanceOf(bob);
     uint256 charlieSpent = charlieBefore - wcol.balanceOf(charlie);
 
-    // Alice: notional = 100 * 0.40 = 40e18, makerFee = 40e18 * 100 / 10000 = 0.4e18
+    // Each buyer pays only their notional — fees are deducted from the pool
     uint256 aliceNotional = (amount * price0) / ONE;
-    uint256 aliceFee = (aliceNotional * 100) / BPS;
-    assertEq(aliceSpent, aliceNotional + aliceFee, "alice maker fee wrong");
+    assertEq(aliceSpent, aliceNotional, "alice pays only notional");
 
-    // Bob: notional = 100 * 0.30 = 30e18, makerFee = 30e18 * 100 / 10000 = 0.3e18
     uint256 bobNotional = (amount * price1) / ONE;
-    uint256 bobFee = (bobNotional * 100) / BPS;
-    assertEq(bobSpent, bobNotional + bobFee, "bob maker fee wrong");
+    assertEq(bobSpent, bobNotional, "bob pays only notional");
 
-    // Charlie (taker): notional = 100 * 0.30 = 30e18, takerFee = 30e18 * 300 / 10000 = 0.9e18
-    uint256 charlieNotional = (amount * price2) / ONE;
+    uint256 charlieNotional = amount - aliceNotional - bobNotional;
+    assertEq(charlieSpent, charlieNotional, "charlie pays only notional");
+
+    // Fees are deducted from the pool and sent to feeModule
+    uint256 aliceFee = (aliceNotional * 100) / BPS;
+    uint256 bobFee = (bobNotional * 100) / BPS;
     uint256 charlieFee = (charlieNotional * 300) / BPS;
-    assertEq(charlieSpent, charlieNotional + charlieFee, "charlie taker fee wrong");
+    uint256 totalFees = aliceFee + bobFee + charlieFee;
+
+    assertEq(wcol.balanceOf(address(feeModule)), totalFees, "feeModule received fees");
   }
 
   // =========================================================================
@@ -551,7 +572,7 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     params[1] = _mkParam("Harris");
     params[2] = _mkParam("Biden");
 
-    eventId = adapter.createEvent(params);
+    eventId = adapter.createEvent("Who will win?", params);
     marketIds = adapter.getEventMarkets(eventId);
   }
 
@@ -560,7 +581,6 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
       closesAt: block.timestamp + 1 days,
       question: question,
       image: "",
-      executionMode: PredictionMarketV3ManagerCLOB.ExecutionMode.CLOB,
       feeModule: address(feeModule),
       oracle: address(0),
       oracleData: ""

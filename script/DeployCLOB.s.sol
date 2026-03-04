@@ -3,6 +3,7 @@ pragma solidity ^0.8.26;
 
 import {Script} from "forge-std/Script.sol";
 import {console} from "forge-std/console.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 import {AdminRegistry} from "../contracts/AdminRegistry.sol";
 import {PredictionMarketV3ManagerCLOB} from "../contracts/PredictionMarketV3ManagerCLOB.sol";
@@ -12,8 +13,9 @@ import {FeeModule} from "../contracts/FeeModule.sol";
 import {IMyriadMarketManager} from "../contracts/IMyriadMarketManager.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-/// @notice Deploys the core CLOB stack (Manager, ConditionalTokens, FeeModule, Exchange).
-///         Oracles are deployed separately via DeployOracles.s.sol.
+/// @notice Deploys the core CLOB stack via UUPS proxies.
+///         Manager, FeeModule, and Exchange are deployed behind ERC1967 proxies.
+///         ConditionalTokens is deployed directly (holds user funds, no proxy).
 ///
 ///         Env vars:
 ///           PRIVATE_KEY      — deployer private key
@@ -43,21 +45,39 @@ contract DeployCLOB is Script {
 
         AdminRegistry registry = AdminRegistry(adminRegistryAddr);
 
-        PredictionMarketV3ManagerCLOB manager = new PredictionMarketV3ManagerCLOB(
-            registry,
-            IERC20(collateral)
+        // Deploy Manager (UUPS proxy)
+        PredictionMarketV3ManagerCLOB managerImpl = new PredictionMarketV3ManagerCLOB();
+        ERC1967Proxy managerProxy = new ERC1967Proxy(
+            address(managerImpl),
+            abi.encodeCall(PredictionMarketV3ManagerCLOB.initialize, (registry, IERC20(collateral)))
         );
-        ConditionalTokens conditionalTokens = new ConditionalTokens(registry, IMyriadMarketManager(address(manager)));
-        FeeModule feeModule = new FeeModule(registry, treasuryAddr);
-        MyriadCTFExchange exchange = new MyriadCTFExchange(
-            IMyriadMarketManager(address(manager)),
-            conditionalTokens,
-            address(feeModule),
-            registry
-        );
+        PredictionMarketV3ManagerCLOB manager = PredictionMarketV3ManagerCLOB(address(managerProxy));
 
-        conditionalTokens.setExchange(address(exchange));
-        feeModule.setExchange(address(exchange));
+        // Deploy ConditionalTokens (no proxy — holds user funds)
+        ConditionalTokens conditionalTokens = new ConditionalTokens(registry, IMyriadMarketManager(address(manager)));
+
+        // Deploy FeeModule (UUPS proxy)
+        FeeModule feeModuleImpl = new FeeModule();
+        ERC1967Proxy feeModuleProxy = new ERC1967Proxy(
+            address(feeModuleImpl),
+            abi.encodeCall(FeeModule.initialize, (registry, treasuryAddr))
+        );
+        FeeModule feeModuleContract = FeeModule(address(feeModuleProxy));
+
+        // Deploy Exchange (UUPS proxy)
+        MyriadCTFExchange exchangeImpl = new MyriadCTFExchange();
+        ERC1967Proxy exchangeProxy = new ERC1967Proxy(
+            address(exchangeImpl),
+            abi.encodeCall(MyriadCTFExchange.initialize, (
+                IMyriadMarketManager(address(manager)),
+                conditionalTokens,
+                address(feeModuleContract),
+                registry
+            ))
+        );
+        MyriadCTFExchange exchange = MyriadCTFExchange(address(exchangeProxy));
+
+        feeModuleContract.setExchange(address(exchange));
 
         registry.grantRole(registry.MARKET_ADMIN_ROLE(), admin);
         registry.grantRole(registry.FEE_ADMIN_ROLE(), admin);
@@ -68,8 +88,11 @@ contract DeployCLOB is Script {
 
         console.log("AdminRegistry:", adminRegistryAddr);
         console.log("Manager:", address(manager));
+        console.log("Manager impl:", address(managerImpl));
         console.log("ConditionalTokens:", address(conditionalTokens));
-        console.log("FeeModule:", address(feeModule));
+        console.log("FeeModule:", address(feeModuleContract));
+        console.log("FeeModule impl:", address(feeModuleImpl));
         console.log("Exchange:", address(exchange));
+        console.log("Exchange impl:", address(exchangeImpl));
     }
 }

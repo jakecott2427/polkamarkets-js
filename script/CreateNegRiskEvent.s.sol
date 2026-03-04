@@ -14,6 +14,7 @@ import {PredictionMarketV3ManagerCLOB} from "../contracts/PredictionMarketV3Mana
 ///           CLOB_FEE_MODULE      — FeeModule address (used per-market)
 ///           CLOSES_AT            — unix timestamp when all outcome markets close
 ///           OUTCOMES             — comma-separated outcome names (e.g. "Trump,Harris,Biden")
+///           QUESTION             — parent event question (e.g. "Who will win the election?")
 ///
 ///         Env vars (optional):
 ///           IMAGE                — IPFS hash or URL (default: "")
@@ -26,6 +27,7 @@ contract CreateNegRiskEvent is Script {
         address feeModule = vm.envAddress("CLOB_FEE_MODULE");
         uint256 closesAt = vm.envUint("CLOSES_AT");
         string memory outcomesRaw = vm.envString("OUTCOMES");
+        string memory eventQuestion = vm.envString("QUESTION");
         string memory image = vm.envOr("IMAGE", string(""));
         address oracle = vm.envOr("ORACLE", address(0));
 
@@ -41,7 +43,6 @@ contract CreateNegRiskEvent is Script {
                 closesAt: closesAt,
                 question: outcomes[i],
                 image: image,
-                executionMode: PredictionMarketV3ManagerCLOB.ExecutionMode.CLOB,
                 feeModule: feeModule,
                 oracle: oracle,
                 oracleData: ""
@@ -50,7 +51,7 @@ contract CreateNegRiskEvent is Script {
 
         vm.startBroadcast(privateKey);
 
-        bytes32 eventId = NegRiskAdapter(adapterAddr).createEvent(params);
+        bytes32 eventId = NegRiskAdapter(adapterAddr).createEvent(eventQuestion, params);
 
         vm.stopBroadcast();
 

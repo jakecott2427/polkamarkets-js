@@ -54,8 +54,8 @@ class PredictionMarketV3ManagerCLOBContract extends IContract {
     return await this.getContract().methods.getMarketCollateral(marketId).call();
   }
 
-  async getMarketOutcome({ marketId }) {
-    return await this.getContract().methods.getMarketOutcome(marketId).call();
+  async getMarketResolvedOutcome({ marketId }) {
+    return await this.getContract().methods.getMarketResolvedOutcome(marketId).call();
   }
 
   async getMarketState({ marketId }) {
