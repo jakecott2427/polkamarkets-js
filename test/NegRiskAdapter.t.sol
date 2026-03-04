@@ -281,7 +281,7 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     assertEq(aliceYes1Balance, amount);
 
     vm.prank(alice);
-    conditionalTokens.redeemPositions(marketIds[1]);
+    conditionalTokens.redeemPosition(marketIds[1]);
 
     // Alice gets wcol, needs to unwrap
     uint256 aliceWcol = wcol.balanceOf(alice);
@@ -326,7 +326,7 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     assertEq(bobNo0, amount);
 
     vm.prank(bob);
-    conditionalTokens.redeemPositions(marketIds[0]);
+    conditionalTokens.redeemPosition(marketIds[0]);
 
     uint256 bobWcol = wcol.balanceOf(bob);
     assertEq(bobWcol, amount);

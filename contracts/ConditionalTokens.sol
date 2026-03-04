@@ -43,7 +43,7 @@ contract ConditionalTokens is ERC1155, ReentrancyGuard {
     collateral.safeTransfer(msg.sender, amount);
   }
 
-  function redeemPositions(uint256 marketId) external nonReentrant {
+  function redeemPosition(uint256 marketId) external nonReentrant {
     int256 outcome = manager.getMarketResolvedOutcome(marketId);
     require(outcome == 0 || outcome == 1, "not resolved");
 
@@ -87,6 +87,18 @@ contract ConditionalTokens is ERC1155, ReentrancyGuard {
 
     IERC20 collateral = manager.getMarketCollateral(marketId);
     collateral.safeTransfer(msg.sender, totalPayout);
+  }
+
+  /// @notice Burn the caller's losing outcome tokens after resolution. Reverts for voided markets or if the caller holds no losing balance.
+  function prunePosition(uint256 marketId) external nonReentrant {
+    int256 resolvedOutcome = manager.getMarketResolvedOutcome(marketId);
+    require(resolvedOutcome == 0 || resolvedOutcome == 1, "not resolved");
+
+    uint256 losingTokenId = getTokenId(marketId, resolvedOutcome == 0 ? 1 : 0);
+    uint256 amount = balanceOf(msg.sender, losingTokenId);
+    require(amount > 0, "no losing balance");
+
+    _burn(msg.sender, losingTokenId, amount);
   }
 
   function getTokenId(uint256 marketId, uint256 outcome) public pure returns (uint256) {

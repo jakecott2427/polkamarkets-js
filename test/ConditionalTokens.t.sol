@@ -241,10 +241,10 @@ contract ConditionalTokensTest is Test {
     }
 
     // =========================================================================
-    // redeemPositions
+    // redeemPosition
     // =========================================================================
 
-    function testRedeemPositionsOutcome0Winner() public {
+    function testRedeemPositionOutcome0Winner() public {
         uint256 amount = 100 ether;
         collateral.mint(alice, amount);
         _approveAndSplit(alice, amount);
@@ -255,7 +255,7 @@ contract ConditionalTokensTest is Test {
 
         uint256 before = collateral.balanceOf(alice);
         vm.prank(alice);
-        ct.redeemPositions(marketId);
+        ct.redeemPosition(marketId);
 
         assertEq(collateral.balanceOf(alice), before + amount);
         // Losing token stays (outcome 1)
@@ -264,7 +264,7 @@ contract ConditionalTokensTest is Test {
         assertEq(ct.balanceOf(alice, _tokenId(marketId, 0)), 0);
     }
 
-    function testRedeemPositionsOutcome1Winner() public {
+    function testRedeemPositionOutcome1Winner() public {
         uint256 amount = 100 ether;
         collateral.mint(alice, amount);
         _approveAndSplit(alice, amount);
@@ -275,7 +275,7 @@ contract ConditionalTokensTest is Test {
 
         uint256 before = collateral.balanceOf(alice);
         vm.prank(alice);
-        ct.redeemPositions(marketId);
+        ct.redeemPosition(marketId);
 
         assertEq(collateral.balanceOf(alice), before + amount);
         // Losing token stays (outcome 0)
@@ -284,22 +284,22 @@ contract ConditionalTokensTest is Test {
         assertEq(ct.balanceOf(alice, _tokenId(marketId, 1)), 0);
     }
 
-    function testRedeemPositionsNotResolvedReverts() public {
+    function testRedeemPositionNotResolvedReverts() public {
         vm.prank(alice);
         vm.expectRevert("not resolved");
-        ct.redeemPositions(marketId);
+        ct.redeemPosition(marketId);
     }
 
-    function testRedeemPositionsNoBalanceReverts() public {
+    function testRedeemPositionNoBalanceReverts() public {
         vm.warp(block.timestamp + 2 days);
         manager.adminResolveMarket(marketId, 0);
 
         vm.prank(alice);
         vm.expectRevert("no balance");
-        ct.redeemPositions(marketId);
+        ct.redeemPosition(marketId);
     }
 
-    function testRedeemPositionsDoubleRedeemReverts() public {
+    function testRedeemPositionDoubleRedeemReverts() public {
         uint256 amount = 100 ether;
         collateral.mint(alice, amount);
         _approveAndSplit(alice, amount);
@@ -308,11 +308,11 @@ contract ConditionalTokensTest is Test {
         manager.adminResolveMarket(marketId, 0);
 
         vm.prank(alice);
-        ct.redeemPositions(marketId);
+        ct.redeemPosition(marketId);
 
         vm.prank(alice);
         vm.expectRevert("no balance");
-        ct.redeemPositions(marketId);
+        ct.redeemPosition(marketId);
     }
 
     // =========================================================================
@@ -414,5 +414,153 @@ contract ConditionalTokensTest is Test {
         vm.prank(alice);
         vm.expectRevert("no balance");
         ct.redeemVoided(marketId);
+    }
+
+    // =========================================================================
+    // prunePosition
+    // =========================================================================
+
+    function testPrunePositionOutcome0Wins() public {
+        uint256 amount = 100 ether;
+        collateral.mint(alice, amount);
+
+        vm.startPrank(alice);
+        collateral.approve(address(ct), amount);
+        ct.splitPosition(marketId, amount);
+        vm.stopPrank();
+
+        manager.adminResolveMarket(marketId, 0); // outcome 0 wins → outcome 1 is losing
+
+        uint256 winningTokenId = ct.getTokenId(marketId, 0);
+        uint256 losingTokenId  = ct.getTokenId(marketId, 1);
+
+        vm.prank(alice);
+        ct.prunePosition(marketId);
+
+        // Losing tokens gone; winning tokens untouched
+        assertEq(ct.balanceOf(alice, losingTokenId),  0);
+        assertEq(ct.balanceOf(alice, winningTokenId), amount);
+    }
+
+    function testPrunePositionOutcome1Wins() public {
+        uint256 amount = 100 ether;
+        collateral.mint(alice, amount);
+
+        vm.startPrank(alice);
+        collateral.approve(address(ct), amount);
+        ct.splitPosition(marketId, amount);
+        vm.stopPrank();
+
+        manager.adminResolveMarket(marketId, 1); // outcome 1 wins → outcome 0 is losing
+
+        uint256 winningTokenId = ct.getTokenId(marketId, 1);
+        uint256 losingTokenId  = ct.getTokenId(marketId, 0);
+
+        vm.prank(alice);
+        ct.prunePosition(marketId);
+
+        assertEq(ct.balanceOf(alice, losingTokenId),  0);
+        assertEq(ct.balanceOf(alice, winningTokenId), amount);
+    }
+
+    function testPrunePositionDoesNotReturnCollateral() public {
+        uint256 amount = 100 ether;
+        collateral.mint(alice, amount);
+
+        vm.startPrank(alice);
+        collateral.approve(address(ct), amount);
+        ct.splitPosition(marketId, amount);
+        vm.stopPrank();
+
+        manager.adminResolveMarket(marketId, 0);
+
+        uint256 colBefore = collateral.balanceOf(alice);
+        vm.prank(alice);
+        ct.prunePosition(marketId);
+
+        // No collateral returned — losing token is worth zero
+        assertEq(collateral.balanceOf(alice), colBefore);
+    }
+
+    function testPrunePositionUnresolvedReverts() public {
+        uint256 amount = 50 ether;
+        collateral.mint(alice, amount);
+
+        vm.startPrank(alice);
+        collateral.approve(address(ct), amount);
+        ct.splitPosition(marketId, amount);
+        vm.stopPrank();
+
+        vm.prank(alice);
+        vm.expectRevert("not resolved");
+        ct.prunePosition(marketId);
+    }
+
+    function testPrunePositionVoidedReverts() public {
+        uint256 amount = 50 ether;
+        collateral.mint(alice, amount);
+
+        vm.startPrank(alice);
+        collateral.approve(address(ct), amount);
+        ct.splitPosition(marketId, amount);
+        vm.stopPrank();
+
+        // Voided market — both tokens carry partial value; burning is not allowed
+        manager.adminVoidMarket(marketId, ONE / 2, ONE / 2);
+
+        vm.prank(alice);
+        vm.expectRevert("not resolved");
+        ct.prunePosition(marketId);
+    }
+
+    function testPrunePositionNoBalanceReverts() public {
+        // alice never bought losing tokens
+        manager.adminResolveMarket(marketId, 0);
+
+        vm.prank(alice);
+        vm.expectRevert("no losing balance");
+        ct.prunePosition(marketId);
+    }
+
+    function testPrunePositionDoubleBurnReverts() public {
+        uint256 amount = 50 ether;
+        collateral.mint(alice, amount);
+
+        vm.startPrank(alice);
+        collateral.approve(address(ct), amount);
+        ct.splitPosition(marketId, amount);
+        vm.stopPrank();
+
+        manager.adminResolveMarket(marketId, 0);
+
+        vm.prank(alice);
+        ct.prunePosition(marketId);
+
+        vm.prank(alice);
+        vm.expectRevert("no losing balance");
+        ct.prunePosition(marketId);
+    }
+
+    function testPrunePositionDoesNotBurnWinningToken() public {
+        // Paranoia check: even if alice only holds the winning token (e.g. bought via direct
+        // match), burn should revert with "no losing balance" rather than touching her winnings.
+        uint256 amount = 100 ether;
+        collateral.mint(alice, amount);
+
+        vm.startPrank(alice);
+        collateral.approve(address(ct), amount);
+        ct.splitPosition(marketId, amount);
+        // Transfer the losing token away so alice only holds outcome 0
+        ct.safeTransferFrom(alice, bob, ct.getTokenId(marketId, 1), amount, "");
+        vm.stopPrank();
+
+        manager.adminResolveMarket(marketId, 0); // outcome 0 wins
+
+        // alice holds no losing tokens → should revert, NOT burn her winning tokens
+        vm.prank(alice);
+        vm.expectRevert("no losing balance");
+        ct.prunePosition(marketId);
+
+        assertEq(ct.balanceOf(alice, ct.getTokenId(marketId, 0)), amount);
     }
 }
