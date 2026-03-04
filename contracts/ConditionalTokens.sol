@@ -10,32 +10,21 @@ import "./IMyriadMarketManager.sol";
 
 /// @title ConditionalTokens
 /// @notice ERC1155 outcome positions for binary (outcome 0 / outcome 1) markets.
+///         No privileged minting path — all position creation goes through splitPosition.
 contract ConditionalTokens is ERC1155, ReentrancyGuard {
   using SafeERC20 for IERC20;
 
   AdminRegistry public immutable registry;
   IMyriadMarketManager public immutable manager;
 
-  address public exchange;
-
   constructor(AdminRegistry _registry, IMyriadMarketManager _manager) ERC1155("") {
     registry = _registry;
     manager = _manager;
   }
 
-  modifier onlyExchange() {
-    require(msg.sender == exchange, "only exchange");
-    _;
-  }
-
-  function setExchange(address newExchange) external {
-    require(registry.hasRole(registry.DEFAULT_ADMIN_ROLE(), msg.sender), "not admin");
-    exchange = newExchange;
-  }
-
   function splitPosition(uint256 marketId, uint256 amount) external nonReentrant {
     require(amount > 0, "amount 0");
-    require(manager.getMarketState(marketId) != IMyriadMarketManager.MarketState.resolved, "resolved");
+    require(manager.getMarketState(marketId) == IMyriadMarketManager.MarketState.open, "market not open");
 
     IERC20 collateral = manager.getMarketCollateral(marketId);
     collateral.safeTransferFrom(msg.sender, address(this), amount);
@@ -55,7 +44,7 @@ contract ConditionalTokens is ERC1155, ReentrancyGuard {
   }
 
   function redeemPositions(uint256 marketId) external nonReentrant {
-    int256 outcome = manager.getMarketOutcome(marketId);
+    int256 outcome = manager.getMarketResolvedOutcome(marketId);
     require(outcome == 0 || outcome == 1, "not resolved");
 
     uint256 tokenId = getTokenId(marketId, uint256(outcome));
@@ -70,10 +59,11 @@ contract ConditionalTokens is ERC1155, ReentrancyGuard {
 
   /// @notice Redeem positions from a voided market using admin-specified payout ratios.
   function redeemVoided(uint256 marketId) external nonReentrant {
-    int256 outcome = manager.getMarketOutcome(marketId);
+    int256 outcome = manager.getMarketResolvedOutcome(marketId);
     require(outcome == -1, "not voided");
 
     (uint256 outcome0Payout, uint256 outcome1Payout) = manager.getVoidedPayouts(marketId);
+    require(outcome0Payout + outcome1Payout == 1e18, "invalid payout ratios");
 
     uint256 outcome0Id = getTokenId(marketId, 0);
     uint256 outcome1Id = getTokenId(marketId, 1);
@@ -97,29 +87,6 @@ contract ConditionalTokens is ERC1155, ReentrancyGuard {
 
     IERC20 collateral = manager.getMarketCollateral(marketId);
     collateral.safeTransfer(msg.sender, totalPayout);
-  }
-
-  /// @notice Exchange-only mint for mint-matched buys.
-  function mintPositionsTo(
-    address outcome0Recipient,
-    address outcome1Recipient,
-    uint256 marketId,
-    uint256 amount
-  ) external onlyExchange {
-    require(amount > 0, "amount 0");
-    _mint(outcome0Recipient, getTokenId(marketId, 0), amount, "");
-    _mint(outcome1Recipient, getTokenId(marketId, 1), amount, "");
-  }
-
-  /// @notice Exchange-only merge that burns positions held by the exchange.
-  function mergePositionsTo(address recipient, uint256 marketId, uint256 amount) external onlyExchange {
-    require(amount > 0, "amount 0");
-
-    _burn(msg.sender, getTokenId(marketId, 0), amount);
-    _burn(msg.sender, getTokenId(marketId, 1), amount);
-
-    IERC20 collateral = manager.getMarketCollateral(marketId);
-    collateral.safeTransfer(recipient, amount);
   }
 
   function getTokenId(uint256 marketId, uint256 outcome) public pure returns (uint256) {

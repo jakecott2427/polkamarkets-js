@@ -12,13 +12,15 @@ interface IMyriadMarketManager {
 
   function getMarketCollateral(uint256 marketId) external view returns (IERC20);
 
-  function getMarketOutcome(uint256 marketId) external view returns (int256);
+  function getMarketResolvedOutcome(uint256 marketId) external view returns (int256);
 
   function getMarketState(uint256 marketId) external view returns (MarketState);
 
   function isMarketPaused(uint256 marketId) external view returns (bool);
 
-  function getMarketExecutionMode(uint256 marketId) external view returns (uint8);
-
   function getVoidedPayouts(uint256 marketId) external view returns (uint256 outcome0Payout, uint256 outcome1Payout);
+
+  function isNegRisk(uint256 marketId) external view returns (bool);
+
+  function getEventId(uint256 marketId) external view returns (bytes32);
 }
