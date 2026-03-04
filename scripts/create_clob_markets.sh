@@ -2,9 +2,13 @@
 set -euo pipefail
 
 # ═══════════════════════════════════════════════════════════════════════
-# create_clob_markets.sh — Batch-create CLOB markets with oracle support
+# create_clob_markets.sh — Create CLOB markets or neg-risk events
 #
-# Supports:
+# Modes:
+#   1) Regular — batch-create independent binary (YES/NO) CLOB markets
+#   2) Neg-risk — create a multi-outcome event via NegRiskAdapter
+#
+# Oracle support (regular mode only):
 #   - No oracle (admin-only resolution)
 #   - PriceThreshold oracle (Chainlink — price above/below X)
 #   - UpOrDown oracle (Chainlink — price direction)
@@ -99,6 +103,20 @@ if [[ -n "${LATEST_DEPLOY}" && -f "${LATEST_DEPLOY}" ]]; then
 fi
 
 # ═══════════════════════════════════════════════════════════════════════
+# Mode selection
+# ═══════════════════════════════════════════════════════════════════════
+echo ""
+echo -e "${YELLOW}Market type:${NC}"
+echo "  1) Regular — independent binary (YES/NO) markets"
+if [[ -n "${CLOB_NEG_RISK_ADAPTER:-}" ]]; then
+  echo "  2) Neg-risk — multi-outcome event (e.g. Trump/Harris/Biden)"
+else
+  echo -e "  2) Neg-risk ${RED}(unavailable — NEG_RISK_ADAPTER not in deploy env)${NC}"
+fi
+read -r -p "  Choose [1/2]: " MODE_CHOICE
+MODE_CHOICE="${MODE_CHOICE:-1}"
+
+# ═══════════════════════════════════════════════════════════════════════
 # Configuration
 # ═══════════════════════════════════════════════════════════════════════
 banner "Configuration"
@@ -110,6 +128,134 @@ PRIVATE_KEY="0x${PRIVATE_KEY}"
 prompt_value "RPC_URL" "RPC URL" "${CLOB_RPC_URL:-${RPC_URL:-}}"
 prompt_value "CLOB_MANAGER" "CLOB_MANAGER address" "${CLOB_MANAGER:-}"
 prompt_value "CLOB_FEE_MODULE" "CLOB_FEE_MODULE address" "${CLOB_FEE_MODULE:-}"
+
+if [[ "${MODE_CHOICE}" == "2" ]]; then
+  # ─── Neg-risk mode ───
+  if [[ -z "${CLOB_NEG_RISK_ADAPTER:-}" ]]; then
+    error "NEG_RISK_ADAPTER address not available. Deploy the adapter first or set CLOB_NEG_RISK_ADAPTER."
+    exit 1
+  fi
+
+  prompt_value "NEG_RISK_ADAPTER" "NegRiskAdapter address" "${CLOB_NEG_RISK_ADAPTER:-}"
+
+  unset QUESTION OUTCOMES 2>/dev/null || true
+  prompt_value "QUESTION" "Event question (e.g. \"Who will win the election?\")"
+  prompt_value "OUTCOMES" "Comma-separated outcome names (e.g. \"Trump,Harris,Biden\")"
+
+  IFS=',' read -ra OUTCOME_ARRAY <<< "${OUTCOMES}"
+  MARKET_COUNT="${#OUTCOME_ARRAY[@]}"
+  if [[ "${MARKET_COUNT}" -lt 2 ]]; then
+    error "Neg-risk events require at least 2 outcomes."
+    exit 1
+  fi
+
+  read -r -p "  Close offset (seconds from now) [86400]: " CLOSE_OFFSET
+  CLOSE_OFFSET="${CLOSE_OFFSET:-86400}"
+
+  read -r -p "  Image URL (optional): " IMAGE
+  IMAGE="${IMAGE:-}"
+  export IMAGE
+
+  NOW_TS="$(date +%s)"
+  export CLOSES_AT="$((NOW_TS + CLOSE_OFFSET))"
+  export OUTCOMES QUESTION NEG_RISK_ADAPTER CLOB_FEE_MODULE
+
+  read -r -p "  Set fees for all outcome markets? [y/N]: " SET_FEES
+  SET_FEES="${SET_FEES:-N}"
+  SET_FEES="$(printf '%s' "${SET_FEES}" | tr '[:upper:]' '[:lower:]')"
+
+  if [[ "${SET_FEES}" == "y" || "${SET_FEES}" == "yes" ]]; then
+    read -r -p "  MAKER_FEE_BPS [100]: " MAKER_FEE_BPS
+    MAKER_FEE_BPS="${MAKER_FEE_BPS:-100}"
+    read -r -p "  TAKER_FEE_BPS [200]: " TAKER_FEE_BPS
+    TAKER_FEE_BPS="${TAKER_FEE_BPS:-200}"
+    read -r -p "  Fee curve? Peak at centre, 0 at edges [y/N]: " USE_CURVE
+    USE_CURVE="${USE_CURVE:-N}"
+    USE_CURVE="$(printf '%s' "${USE_CURVE}" | tr '[:upper:]' '[:lower:]')"
+  fi
+
+  # ─── Summary ───
+  echo ""
+  success "Configuration:"
+  echo -e "  ${YELLOW}Mode:${NC}       Neg-risk event"
+  echo -e "  ${YELLOW}Adapter:${NC}    ${NEG_RISK_ADAPTER}"
+  echo -e "  ${YELLOW}FeeModule:${NC}  ${CLOB_FEE_MODULE}"
+  echo -e "  ${YELLOW}Question:${NC}   ${QUESTION}"
+  echo -e "  ${YELLOW}Outcomes:${NC}   ${OUTCOMES} (${MARKET_COUNT} markets)"
+  echo -e "  ${YELLOW}Closes at:${NC}  ${CLOSES_AT} ($(date -r "${CLOSES_AT}" 2>/dev/null || date -d "@${CLOSES_AT}" 2>/dev/null || echo "${CLOSES_AT}"))"
+  [[ "${SET_FEES}" == "y" || "${SET_FEES}" == "yes" ]] && echo -e "  ${YELLOW}Fees:${NC}       maker ${MAKER_FEE_BPS} bps / taker ${TAKER_FEE_BPS} bps"
+  echo ""
+
+  read -r -p "  Continue? [Y/n]: " CONFIRM
+  CONFIRM="${CONFIRM:-y}"
+  if [[ ! "${CONFIRM}" =~ ^[Yy] ]]; then
+    info "Aborted."
+    exit 0
+  fi
+
+  # ─── Create neg-risk event ───
+  banner "Creating Neg-Risk Event"
+
+  cd "${REPO_DIR}"
+
+  FORGE_OUTPUT=""
+  if ! run_forge "Create neg-risk event" \
+    forge script script/CreateNegRiskEvent.s.sol:CreateNegRiskEvent \
+      --rpc-url "${RPC_URL}" \
+      --broadcast; then
+    error "Neg-risk event creation failed."
+    exit 1
+  fi
+
+  echo ""
+  success "Neg-risk event created!"
+
+  # ─── Set fees ───
+  if [[ "${SET_FEES}" == "y" || "${SET_FEES}" == "yes" ]]; then
+    EVENT_OUTPUT="${FORGE_OUTPUT}"
+    OUTCOME_COUNT=$(echo "${EVENT_OUTPUT}" | sed -n 's/.*Outcomes: \([0-9]*\).*/\1/p' | head -1) || true
+    OUTCOME_COUNT="${OUTCOME_COUNT:-${MARKET_COUNT}}"
+
+    LATEST_MARKET_COUNT=$(cast call "${CLOB_MANAGER}" "marketCount()(uint256)" --rpc-url "${RPC_URL}" 2>/dev/null || echo "0")
+    LATEST_MARKET_COUNT=$((LATEST_MARKET_COUNT))
+
+    if [[ "${LATEST_MARKET_COUNT}" -gt 0 && "${OUTCOME_COUNT}" -gt 0 ]]; then
+      FIRST_ID=$((LATEST_MARKET_COUNT - OUTCOME_COUNT))
+      export MAKER_FEE_BPS TAKER_FEE_BPS
+      [[ "${USE_CURVE:-n}" == "y" || "${USE_CURVE:-n}" == "yes" ]] && export FEE_CURVE=true || export FEE_CURVE=false
+
+      for (( i=FIRST_ID; i<LATEST_MARKET_COUNT; i++ )); do
+        export MARKET_ID="${i}"
+        FORGE_OUTPUT=""
+        if ! run_forge "Set fees for market #${i}" \
+          forge script script/SetCLOBFees.s.sol:SetCLOBFees \
+            --rpc-url "${RPC_URL}" \
+            --broadcast; then
+          warn "Fee setting failed for market #${i}, continuing..."
+        else
+          success "Fees set for market #${i}"
+        fi
+      done
+    else
+      warn "Could not determine market IDs. Set fees manually with SetCLOBFees."
+    fi
+  fi
+
+  # ─── Done ───
+  banner "Done!"
+
+  echo -e "${GREEN}Created neg-risk event with ${MARKET_COUNT} outcome market(s).${NC}"
+  echo ""
+  echo -e "${YELLOW}Next:${NC} Run the cron to sync to the API database:"
+  echo "  cd myriad-protocol-api && ./scripts/cron-jobs.sh"
+  echo ""
+
+  exit 0
+fi
+
+# ═══════════════════════════════════════════════════════════════════════
+# Regular mode — independent binary markets
+# ═══════════════════════════════════════════════════════════════════════
 
 unset ORACLE CHAINLINK_FEED PRICE_THRESHOLD RESOLVE_ABOVE RESOLVE_UP ARBITRATOR REALITIO_TIMEOUT 2>/dev/null || true
 
@@ -218,6 +364,7 @@ fi
 # ═══════════════════════════════════════════════════════════════════════
 echo ""
 success "Configuration:"
+echo -e "  ${YELLOW}Mode:${NC}       Regular binary markets"
 echo -e "  ${YELLOW}Manager:${NC}    ${CLOB_MANAGER}"
 echo -e "  ${YELLOW}FeeModule:${NC}  ${CLOB_FEE_MODULE}"
 echo -e "  ${YELLOW}Oracle:${NC}     ${ORACLE_TYPE} (${ORACLE_ADDR})"
@@ -300,6 +447,6 @@ fi
 echo ""
 echo -e "${YELLOW}Oracle:${NC} ${ORACLE_TYPE} (${ORACLE_ADDR})"
 echo ""
-echo -e "${YELLOW}Next:${NC} Run importClobMarkets to sync to the API database:"
-echo "  cd myriad-protocol-api && npx tsx src/scripts/importClobMarkets.ts"
+echo -e "${YELLOW}Next:${NC} Run the cron to sync to the API database:"
+echo "  cd myriad-protocol-api && ./scripts/cron-jobs.sh"
 echo ""
