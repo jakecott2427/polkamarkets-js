@@ -68,7 +68,6 @@ contract CreateCLOBMarket is Script {
                 closesAt: closesAt,
                 question: question,
                 image: image,
-                executionMode: PredictionMarketV3ManagerCLOB.ExecutionMode.CLOB,
                 feeModule: feeModule,
                 oracle: oracle,
                 oracleData: oracleData

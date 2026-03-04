@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import "./AdminRegistry.sol";
@@ -13,13 +15,12 @@ import "./AdminRegistry.sol";
 /// @dev Tiers are sorted ascending by maxPrice. The first tier whose maxPrice is
 ///      strictly greater than the trade price is applied; if none match, fees are 0.
 ///      Each FeeTier is packed into a single storage slot (128 + 64 + 64 = 256 bits).
-contract FeeModule {
+contract FeeModule is Initializable, UUPSUpgradeable {
   using SafeERC20 for IERC20;
 
   // ─── Types ───────────────────────────────────────────────────────────
 
   /// @notice A fee tier covering prices in [prev.maxPrice, maxPrice).
-  ///         Packed into one storage slot.
   struct FeeTier {
     uint128 maxPrice;   // exclusive upper bound in 1e18 (0 < maxPrice <= 1e18)
     uint64 makerFeeBps; // maker fee in basis points (0-10000)
@@ -34,7 +35,7 @@ contract FeeModule {
 
   // ─── State ───────────────────────────────────────────────────────────
 
-  AdminRegistry public immutable registry;
+  AdminRegistry public registry;
 
   /// @dev Fee tiers per market, sorted ascending by maxPrice.
   mapping(uint256 => FeeTier[]) internal _marketFees;
@@ -56,17 +57,28 @@ contract FeeModule {
   event ExchangeUpdated(address indexed newExchange);
   event TreasuryUpdated(address indexed newTreasury);
 
-  // ─── Constructor ─────────────────────────────────────────────────────
+  // ─── Constructor / Initializer ──────────────────────────────────────
 
-  constructor(AdminRegistry _registry, address _treasury) {
+  /// @custom:oz-upgrades-unsafe-allow constructor
+  constructor() {
+    _disableInitializers();
+  }
+
+  function initialize(AdminRegistry _registry, address _treasury) public initializer {
+    __UUPSUpgradeable_init();
+
+    require(address(_registry) != address(0), "registry 0");
     require(_treasury != address(0), "treasury 0");
     registry = _registry;
     treasury = _treasury;
   }
 
+  function _authorizeUpgrade(address) internal view override {
+    require(registry.hasRole(registry.DEFAULT_ADMIN_ROLE(), msg.sender), "not admin");
+  }
+
   // ─── Admin setters ──────────────────────────────────────────────────
 
-  /// @notice Set the exchange address that is allowed to call accrueFees().
   function setExchange(address newExchange) external {
     require(registry.hasRole(registry.DEFAULT_ADMIN_ROLE(), msg.sender), "not admin");
     require(newExchange != address(0), "exchange 0");
@@ -74,7 +86,6 @@ contract FeeModule {
     emit ExchangeUpdated(newExchange);
   }
 
-  /// @notice Update the treasury address; only DEFAULT_ADMIN can call this.
   function setTreasury(address newTreasury) external {
     require(registry.hasRole(registry.DEFAULT_ADMIN_ROLE(), msg.sender), "not admin");
     require(newTreasury != address(0), "treasury 0");
@@ -82,10 +93,6 @@ contract FeeModule {
     emit TreasuryUpdated(newTreasury);
   }
 
-  /// @notice Set fee schedule for a market as an array of sorted tiers.
-  ///         Tiers must be sorted strictly ascending by maxPrice.
-  ///         The last tier's maxPrice acts as the upper bound for all prices up to 1e18.
-  /// @param tiers Up to MAX_TIERS entries. Pass an empty array to clear all fees.
   function setMarketFees(uint256 marketId, FeeTier[] calldata tiers) external {
     require(registry.hasRole(registry.FEE_ADMIN_ROLE(), msg.sender), "not fee admin");
     require(tiers.length <= MAX_TIERS, "too many tiers");
@@ -98,7 +105,6 @@ contract FeeModule {
       }
     }
 
-    // Replace storage array.
     delete _marketFees[marketId];
     for (uint256 i = 0; i < tiers.length; i++) {
       _marketFees[marketId].push(tiers[i]);
@@ -109,22 +115,16 @@ contract FeeModule {
 
   // ─── Getters ─────────────────────────────────────────────────────────
 
-  /// @notice Return all fee tiers for a market.
   function getMarketFees(uint256 marketId) external view returns (FeeTier[] memory) {
     return _marketFees[marketId];
   }
 
-  /// @notice Return (makerBps, takerBps) for the tier that covers `price`.
-  ///         Returns (0, 0) if no tier is configured or price is above all tiers.
   function getFeesAtPrice(uint256 marketId, uint256 price) external view returns (uint16 makerBps, uint16 takerBps) {
     return _lookupFees(marketId, price);
   }
 
   // ─── Fee accrual ─────────────────────────────────────────────────────
 
-  /// @notice Called by the exchange after tokens have been transferred here.
-  ///         Only the registered exchange may call this. Verifies that the
-  ///         contract actually holds at least the newly accrued amount.
   function accrueFees(address token, uint256 amount) external {
     require(msg.sender == exchange, "only exchange");
     accruedFees[token] += amount;
@@ -134,8 +134,6 @@ contract FeeModule {
 
   // ─── Withdrawal ──────────────────────────────────────────────────────
 
-  /// @notice Withdraw accrued fees to the treasury.
-  ///         Only callable by a fee-admin; destination is always `treasury`.
   function withdrawFees(address token, uint256 amount) external {
     require(registry.hasRole(registry.FEE_ADMIN_ROLE(), msg.sender), "not fee admin");
     require(treasury != address(0), "treasury not set");
@@ -150,10 +148,6 @@ contract FeeModule {
 
   // ─── Internal ─────────────────────────────────────────────────────
 
-  /// @dev Linear scan through tiers (max MAX_TIERS = 100 iterations).
-  ///      Returns the fee pair for the first tier whose maxPrice > price.
-  ///      Note: a price exactly equal to a tier's maxPrice falls to the next tier.
-  ///      The final tier should use maxPrice = ONE (1e18) to cover all valid prices.
   function _lookupFees(uint256 marketId, uint256 price) internal view returns (uint16 makerBps, uint16 takerBps) {
     FeeTier[] storage tiers = _marketFees[marketId];
     for (uint256 i = 0; i < tiers.length; i++) {
