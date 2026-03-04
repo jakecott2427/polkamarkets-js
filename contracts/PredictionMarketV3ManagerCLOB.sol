@@ -74,6 +74,9 @@ contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardUpgradea
   }
 
   function initialize(AdminRegistry _registry, IERC20 _collateralToken) public initializer {
+    require(address(_registry) != address(0), "registry 0");
+    require(address(_collateralToken) != address(0), "collateral 0");
+
     __ReentrancyGuard_init();
     __UUPSUpgradeable_init();
 

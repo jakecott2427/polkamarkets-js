@@ -45,7 +45,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
   struct Order {
     address trader;
     uint256 marketId;
-    uint8 outcome; // 0 = outcome 0, 1 = outcome 1
+    uint8 outcomeId; // 0 = outcome 0, 1 = outcome 1
     Side side;
     uint256 amount;       // max shares for this order
     uint256 price;        // collateral per share, 1e18 precision
@@ -61,7 +61,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
 
   bytes32 private constant ORDER_TYPEHASH =
     keccak256(
-      "Order(address trader,uint256 marketId,uint8 outcome,uint8 side,uint256 amount,uint256 price,uint256 minFillAmount,uint256 nonce,uint256 expiration)"
+      "Order(address trader,uint256 marketId,uint8 outcomeId,uint8 side,uint256 amount,uint256 price,uint256 minFillAmount,uint256 nonce,uint256 expiration)"
     );
   uint256 private constant ONE = 1e18;
   uint256 private constant BPS = 10000;
@@ -108,6 +108,11 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
     address _feeModule,
     AdminRegistry _registry
   ) public initializer {
+    require(address(_manager) != address(0), "manager 0");
+    require(address(_conditionalTokens) != address(0), "ct 0");
+    require(_feeModule != address(0), "fee module 0");
+    require(address(_registry) != address(0), "registry 0");
+
     __ReentrancyGuard_init();
     __Pausable_init();
     __UUPSUpgradeable_init();
@@ -218,7 +223,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
     for (uint256 i = 0; i < orders.length; i++) {
       Order calldata order = orders[i];
       require(order.side == Side.Buy, "not buy");
-      require(order.outcome == 0, "not YES");
+      require(order.outcomeId == 0, "not YES");
       require(order.price > 0 && order.price <= ONE, "bad price");
       // Verify every order's market maps to the same eventId
       require(manager.getEventId(order.marketId) == eventId, "event mismatch");
@@ -303,7 +308,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
             ORDER_TYPEHASH,
             order.trader,
             order.marketId,
-            order.outcome,
+            order.outcomeId,
             order.side,
             order.amount,
             order.price,
@@ -338,7 +343,6 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
     _validateOrder(taker, takerSig);
 
     require(maker.trader != taker.trader, "self trade");
-    require(maker.outcome < 2 && taker.outcome < 2, "bad outcome");
     require(maker.price > 0 && taker.price > 0, "bad price");
     require(maker.price <= ONE && taker.price <= ONE, "price > 1");
     require(fillAmount > 0, "fill 0");
@@ -352,6 +356,9 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
     require(maker.minFillAmount == 0 || fillAmount >= maker.minFillAmount, "below maker min fill");
     require(taker.minFillAmount == 0 || fillAmount >= taker.minFillAmount, "below taker min fill");
 
+    filledAmounts[makerHash] += fillAmount;
+    filledAmounts[takerHash] += fillAmount;
+
     if (maker.side != taker.side) {
       (totalFees, ) = _settleDirectMatch(maker, taker, fillAmount, feeConfig);
     } else if (maker.side == Side.Buy) {
@@ -360,9 +367,6 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
       totalFees = _settleMergeMatch(maker, taker, fillAmount, feeConfig);
     }
 
-    filledAmounts[makerHash] += fillAmount;
-    filledAmounts[takerHash] += fillAmount;
-
     emit OrdersMatched(makerHash, takerHash, maker.marketId, fillAmount, filledAmounts[makerHash], filledAmounts[takerHash]);
   }
 
@@ -370,6 +374,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
     require(order.trader != address(0), "trader 0");
     require(order.amount > 0, "amount 0");
     require(order.expiration == 0 || order.expiration >= block.timestamp, "expired");
+    require(order.outcomeId < 2, "bad outcome");
 
     bytes32 orderHash = hashOrder(order);
     require(!orderInvalidated[orderHash], "invalidated");
@@ -393,7 +398,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
     uint256 fillAmount,
     FeeConfig memory feeConfig
   ) internal returns (uint256 totalProtocolFees, uint256 actualShares) {
-    require(maker.outcome == taker.outcome, "outcome mismatch");
+    require(maker.outcomeId == taker.outcomeId, "outcome mismatch");
 
     if (maker.side == Side.Buy) {
       require(taker.side == Side.Sell, "side mismatch");
@@ -430,7 +435,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
     conditionalTokens.safeTransferFrom(
       seller,
       buyer,
-      conditionalTokens.getTokenId(maker.marketId, maker.outcome),
+      conditionalTokens.getTokenId(maker.marketId, maker.outcomeId),
       fillAmount,
       ""
     );
@@ -453,10 +458,10 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
     FeeConfig memory feeConfig
   ) internal returns (uint256 totalProtocolFees, uint256 actualShares) {
     require(maker.side == Side.Buy && taker.side == Side.Buy, "side mismatch");
-    require(maker.outcome != taker.outcome, "same outcome");
+    require(maker.outcomeId != taker.outcomeId, "same outcome");
     _requireMarketOpen(maker.marketId);
 
-    (Order calldata outcome0Order, Order calldata outcome1Order) = maker.outcome == 0 ? (maker, taker) : (taker, maker);
+    (Order calldata outcome0Order, Order calldata outcome1Order) = maker.outcomeId == 0 ? (maker, taker) : (taker, maker);
     require(outcome0Order.price + outcome1Order.price == ONE, "price sum");
 
     IERC20 collateral = manager.getMarketCollateral(maker.marketId);
@@ -505,10 +510,10 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
     FeeConfig memory feeConfig
   ) internal returns (uint256 totalProtocolFees) {
     require(maker.side == Side.Sell && taker.side == Side.Sell, "side mismatch");
-    require(maker.outcome != taker.outcome, "same outcome");
+    require(maker.outcomeId != taker.outcomeId, "same outcome");
     _requireMarketOpen(maker.marketId);
 
-    (Order calldata outcome0Order, Order calldata outcome1Order) = maker.outcome == 0 ? (maker, taker) : (taker, maker);
+    (Order calldata outcome0Order, Order calldata outcome1Order) = maker.outcomeId == 0 ? (maker, taker) : (taker, maker);
     require(outcome0Order.price + outcome1Order.price == ONE, "price sum");
 
     uint256 outcome0TokenId = conditionalTokens.getTokenId(maker.marketId, 0);

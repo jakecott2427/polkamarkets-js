@@ -587,7 +587,7 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     return MyriadCTFExchange.Order({
       trader: trader,
       marketId: marketId_,
-      outcome: outcome,
+      outcomeId: outcome,
       side: side,
       amount: amount,
       price: price,
