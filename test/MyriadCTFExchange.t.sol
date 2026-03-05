@@ -613,4 +613,212 @@ contract MyriadCTFExchangeTest is Test {
         // All collateral went to fees
         assertEq(collateral.balanceOf(address(feeModule)), amount);
     }
+
+    // =========================================================================
+    // Mint match — success paths
+    // =========================================================================
+
+    /// @dev maker BUY outcome0 @ 60c, taker BUY outcome1 @ 40c.
+    ///      Verifies both buyers receive the correct outcome tokens, pay the correct
+    ///      collateral (notional + role-based fee), and that the event is emitted.
+    function testMintMatchSuccess() public {
+        uint256 fillAmount = 100 ether;
+        uint256 makerPrice = (60 * ONE) / 100;
+        uint256 takerPrice = (40 * ONE) / 100;
+
+        collateral.mint(maker, 1000 ether);
+        collateral.mint(taker, 1000 ether);
+        _approveAll(maker);
+        _approveAll(taker);
+
+        MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, fillAmount, makerPrice, 600);
+        MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, fillAmount, takerPrice, 601);
+
+        // Fee math: makerBps=100, takerBps=200 (set in setUp)
+        uint256 makerNotional = (fillAmount * makerPrice) / ONE; // 60e18
+        uint256 takerNotional = fillAmount - makerNotional;       // 40e18
+        uint256 makerFee      = (makerNotional * 100) / BPS;     // 0.6e18
+        uint256 takerFee      = (takerNotional * 200) / BPS;     // 0.8e18
+
+        uint256 makerColBefore = collateral.balanceOf(maker);
+        uint256 takerColBefore = collateral.balanceOf(taker);
+
+        bytes32 mHash = exchange.hashOrder(m);
+        bytes32 tHash = exchange.hashOrder(t);
+
+        vm.expectEmit(true, true, true, true, address(exchange));
+        emit MyriadCTFExchange.OrdersMatched(
+            mHash, tHash,
+            maker, taker, marketId,
+            1,           // matchType = mint
+            fillAmount,
+            fillAmount,  // makerAmountFilled (cumulative)
+            fillAmount,  // takerAmountFilled (cumulative)
+            makerFee, takerFee
+        );
+        exchange.matchOrdersWithFees(m, _signOrder(m, makerPk), t, _signOrder(t, takerPk), fillAmount);
+
+        // Maker paid (makerNotional + makerFee), received outcome0 tokens
+        assertEq(collateral.balanceOf(maker), makerColBefore - makerNotional - makerFee);
+        assertEq(conditionalTokens.balanceOf(maker, conditionalTokens.getTokenId(marketId, 0)), fillAmount);
+
+        // Taker paid (takerNotional + takerFee), received outcome1 tokens
+        assertEq(collateral.balanceOf(taker), takerColBefore - takerNotional - takerFee);
+        assertEq(conditionalTokens.balanceOf(taker, conditionalTokens.getTokenId(marketId, 1)), fillAmount);
+
+        // Fees forwarded to feeModule
+        assertEq(collateral.balanceOf(address(feeModule)), makerFee + takerFee);
+
+        // filledAmounts updated for both orders
+        (uint256 mFilled, ) = exchange.getOrderStatus(mHash);
+        (uint256 tFilled, ) = exchange.getOrderStatus(tHash);
+        assertEq(mFilled, fillAmount);
+        assertEq(tFilled, fillAmount);
+    }
+
+    /// @dev Two sequential partial fills of the same mint-match orders.
+    ///      Confirms cumulative filledAmounts and token balances accumulate correctly.
+    function testMintMatchPartialFill() public {
+        uint256 orderSize  = 200 ether;
+        uint256 firstFill  = 80 ether;
+        uint256 secondFill = 60 ether;
+        uint256 makerPrice = (60 * ONE) / 100;
+        uint256 takerPrice = (40 * ONE) / 100;
+
+        collateral.mint(maker, 1000 ether);
+        collateral.mint(taker, 1000 ether);
+        _approveAll(maker);
+        _approveAll(taker);
+
+        MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, orderSize, makerPrice, 610);
+        MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, orderSize, takerPrice, 611);
+
+        bytes memory mSig = _signOrder(m, makerPk);
+        bytes memory tSig = _signOrder(t, takerPk);
+
+        exchange.matchOrdersWithFees(m, mSig, t, tSig, firstFill);
+        exchange.matchOrdersWithFees(m, mSig, t, tSig, secondFill);
+
+        bytes32 mHash = exchange.hashOrder(m);
+        bytes32 tHash = exchange.hashOrder(t);
+        (uint256 mFilled, ) = exchange.getOrderStatus(mHash);
+        (uint256 tFilled, ) = exchange.getOrderStatus(tHash);
+        assertEq(mFilled, firstFill + secondFill);
+        assertEq(tFilled, firstFill + secondFill);
+
+        // Each buyer has accumulated tokens across both fills
+        assertEq(conditionalTokens.balanceOf(maker, conditionalTokens.getTokenId(marketId, 0)), firstFill + secondFill);
+        assertEq(conditionalTokens.balanceOf(taker, conditionalTokens.getTokenId(marketId, 1)), firstFill + secondFill);
+    }
+
+    // =========================================================================
+    // Merge match — success paths
+    // =========================================================================
+
+    /// @dev maker SELL outcome0 @ 60c, taker SELL outcome1 @ 40c.
+    ///      Verifies outcome tokens are burned, each seller receives notional minus
+    ///      their role-based fee, and fees reach the feeModule.
+    function testMergeMatchSuccess() public {
+        uint256 fillAmount = 100 ether;
+        uint256 makerPrice = (60 * ONE) / 100;
+        uint256 takerPrice = (40 * ONE) / 100;
+
+        collateral.mint(maker, 1000 ether);
+        collateral.mint(taker, 1000 ether);
+        _approveAll(maker);
+        _approveAll(taker);
+
+        // Each trader splits to obtain both outcome tokens; each will sell one side.
+        vm.prank(maker);
+        conditionalTokens.splitPosition(marketId, fillAmount);
+        vm.prank(taker);
+        conditionalTokens.splitPosition(marketId, fillAmount);
+
+        MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Sell, fillAmount, makerPrice, 700);
+        MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Sell, fillAmount, takerPrice, 701);
+
+        // Fee math: makerBps=100, takerBps=200
+        uint256 makerNotional = (fillAmount * makerPrice) / ONE; // 60e18
+        uint256 takerNotional = fillAmount - makerNotional;       // 40e18
+        uint256 makerFee      = (makerNotional * 100) / BPS;     // 0.6e18
+        uint256 takerFee      = (takerNotional * 200) / BPS;     // 0.8e18
+
+        // Measure collateral after splits (each paid fillAmount for their tokens)
+        uint256 makerColBefore = collateral.balanceOf(maker);
+        uint256 takerColBefore = collateral.balanceOf(taker);
+
+        bytes32 mHash = exchange.hashOrder(m);
+        bytes32 tHash = exchange.hashOrder(t);
+
+        vm.expectEmit(true, true, true, true, address(exchange));
+        emit MyriadCTFExchange.OrdersMatched(
+            mHash, tHash,
+            maker, taker, marketId,
+            2,           // matchType = merge
+            fillAmount,
+            fillAmount,  // makerAmountFilled (cumulative)
+            fillAmount,  // takerAmountFilled (cumulative)
+            makerFee, takerFee
+        );
+        exchange.matchOrdersWithFees(m, _signOrder(m, makerPk), t, _signOrder(t, takerPk), fillAmount);
+
+        // Outcome tokens burned by the exchange during merge
+        assertEq(conditionalTokens.balanceOf(maker, conditionalTokens.getTokenId(marketId, 0)), 0);
+        assertEq(conditionalTokens.balanceOf(taker, conditionalTokens.getTokenId(marketId, 1)), 0);
+
+        // Maker (outcome0 seller) receives makerNotional - makerFee
+        assertEq(collateral.balanceOf(maker), makerColBefore + makerNotional - makerFee);
+
+        // Taker (outcome1 seller) receives takerNotional - takerFee
+        assertEq(collateral.balanceOf(taker), takerColBefore + takerNotional - takerFee);
+
+        // Fees forwarded to feeModule
+        assertEq(collateral.balanceOf(address(feeModule)), makerFee + takerFee);
+    }
+
+    /// @dev maker SELL outcome1 @ 40c, taker SELL outcome0 @ 60c (reversed outcome roles).
+    ///      Verifies the outcome0/outcome1 ordering logic inside _settleMergeMatch correctly
+    ///      maps each seller to their proceeds regardless of who is maker vs taker.
+    function testMergeMatchMakerHoldsOutcome1() public {
+        uint256 fillAmount = 100 ether;
+        uint256 makerPrice = (40 * ONE) / 100; // maker sells outcome1 @ 40c
+        uint256 takerPrice = (60 * ONE) / 100; // taker sells outcome0 @ 60c
+
+        collateral.mint(maker, 1000 ether);
+        collateral.mint(taker, 1000 ether);
+        _approveAll(maker);
+        _approveAll(taker);
+
+        vm.prank(maker);
+        conditionalTokens.splitPosition(marketId, fillAmount);
+        vm.prank(taker);
+        conditionalTokens.splitPosition(marketId, fillAmount);
+
+        MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, 1, MyriadCTFExchange.Side.Sell, fillAmount, makerPrice, 800);
+        MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, 0, MyriadCTFExchange.Side.Sell, fillAmount, takerPrice, 801);
+
+        // Fee math: makerBps=100, takerBps=200
+        // _paySellerWithFees uses (fillAmount * maker.price) for makerNotional
+        uint256 makerNotional = (fillAmount * makerPrice) / ONE; // 40e18
+        uint256 takerNotional = fillAmount - makerNotional;       // 60e18
+        uint256 makerFee      = (makerNotional * 100) / BPS;     // 0.4e18
+        uint256 takerFee      = (takerNotional * 200) / BPS;     // 1.2e18
+
+        uint256 makerColBefore = collateral.balanceOf(maker);
+        uint256 takerColBefore = collateral.balanceOf(taker);
+
+        exchange.matchOrdersWithFees(m, _signOrder(m, makerPk), t, _signOrder(t, takerPk), fillAmount);
+
+        // Outcome tokens burned by the exchange during merge
+        assertEq(conditionalTokens.balanceOf(maker, conditionalTokens.getTokenId(marketId, 1)), 0);
+        assertEq(conditionalTokens.balanceOf(taker, conditionalTokens.getTokenId(marketId, 0)), 0);
+
+        // Proceeds = each seller's outcome notional minus their role fee.
+        // Because prices sum to 1: makerNotional == outcome1Notional, takerNotional == outcome0Notional.
+        assertEq(collateral.balanceOf(maker), makerColBefore + makerNotional - makerFee);
+        assertEq(collateral.balanceOf(taker), takerColBefore + takerNotional - takerFee);
+
+        // Fees forwarded to feeModule
+        assertEq(collateral.balanceOf(address(feeModule)), makerFee + takerFee);
+    }
 }
