@@ -524,7 +524,7 @@ contract PredictionMarketCLOBTest is Test {
     MyriadCTFExchange.Order memory makerOrder = MyriadCTFExchange.Order({
       trader: maker,
       marketId: marketId,
-      outcome: 0,
+      outcomeId: 0,
       side: MyriadCTFExchange.Side.Buy,
       amount: amount,
       price: outcome0Price,
@@ -1392,7 +1392,7 @@ contract PredictionMarketCLOBTest is Test {
       MyriadCTFExchange.Order({
         trader: trader,
         marketId: marketId_,
-        outcome: outcome,
+        outcomeId: outcome,
         side: side,
         amount: amount,
         price: price,
@@ -1416,7 +1416,7 @@ contract PredictionMarketCLOBTest is Test {
       MyriadCTFExchange.Order({
         trader: trader,
         marketId: marketId_,
-        outcome: outcome,
+        outcomeId: outcome,
         side: side,
         amount: amount,
         price: price,

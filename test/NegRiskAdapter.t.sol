@@ -281,7 +281,7 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     assertEq(aliceYes1Balance, amount);
 
     vm.prank(alice);
-    conditionalTokens.redeemPositions(marketIds[1]);
+    conditionalTokens.redeemPosition(marketIds[1]);
 
     // Alice gets wcol, needs to unwrap
     uint256 aliceWcol = wcol.balanceOf(alice);
@@ -326,7 +326,7 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     assertEq(bobNo0, amount);
 
     vm.prank(bob);
-    conditionalTokens.redeemPositions(marketIds[0]);
+    conditionalTokens.redeemPosition(marketIds[0]);
 
     uint256 bobWcol = wcol.balanceOf(bob);
     assertEq(bobWcol, amount);
@@ -340,7 +340,7 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
   // =========================================================================
 
   function testCrossMarketMatch() public {
-    (bytes32 eventId, uint256[] memory marketIds) = _createThreeOutcomeEvent();
+    (, uint256[] memory marketIds) = _createThreeOutcomeEvent();
     uint256 amount = 100 ether;
 
     // Set fees for all markets
@@ -392,7 +392,7 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
   }
 
   function testCrossMarketMatchPriceSumNot1Reverts() public {
-    (bytes32 eventId, uint256[] memory marketIds) = _createThreeOutcomeEvent();
+    (, uint256[] memory marketIds) = _createThreeOutcomeEvent();
 
     // Prices don't sum to 1
     uint256 price0 = (45 * ONE) / 100;
@@ -587,7 +587,7 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     return MyriadCTFExchange.Order({
       trader: trader,
       marketId: marketId_,
-      outcome: outcome,
+      outcomeId: outcome,
       side: side,
       amount: amount,
       price: price,

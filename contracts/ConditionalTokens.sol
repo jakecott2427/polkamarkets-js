@@ -17,6 +17,12 @@ contract ConditionalTokens is ERC1155, ReentrancyGuard {
   AdminRegistry public immutable registry;
   IMyriadMarketManager public immutable manager;
 
+  event PositionSplit(address indexed user, uint256 indexed marketId, address indexed collateral, uint256 amount);
+  event PositionMerged(address indexed user, uint256 indexed marketId, address indexed collateral, uint256 amount);
+  event PositionRedeemed(address indexed user, uint256 indexed marketId, address indexed collateral, uint8 outcomeId, uint256 amount);
+  event VoidedPositionRedeemed(address indexed user, uint256 indexed marketId, address indexed collateral, uint8 outcomeId, uint256 amount);
+  event PositionPruned(address indexed user, uint256 indexed marketId, address indexed collateral, uint8 outcomeId, uint256 amount);
+
   constructor(AdminRegistry _registry, IMyriadMarketManager _manager) ERC1155("") {
     registry = _registry;
     manager = _manager;
@@ -31,6 +37,8 @@ contract ConditionalTokens is ERC1155, ReentrancyGuard {
 
     _mint(msg.sender, getTokenId(marketId, 0), amount, "");
     _mint(msg.sender, getTokenId(marketId, 1), amount, "");
+
+    emit PositionSplit(msg.sender, marketId, address(collateral), amount);
   }
 
   function mergePositions(uint256 marketId, uint256 amount) external nonReentrant {
@@ -41,9 +49,11 @@ contract ConditionalTokens is ERC1155, ReentrancyGuard {
 
     IERC20 collateral = manager.getMarketCollateral(marketId);
     collateral.safeTransfer(msg.sender, amount);
+
+    emit PositionMerged(msg.sender, marketId, address(collateral), amount);
   }
 
-  function redeemPositions(uint256 marketId) external nonReentrant {
+  function redeemPosition(uint256 marketId) external nonReentrant {
     int256 outcome = manager.getMarketResolvedOutcome(marketId);
     require(outcome == 0 || outcome == 1, "not resolved");
 
@@ -55,6 +65,8 @@ contract ConditionalTokens is ERC1155, ReentrancyGuard {
 
     IERC20 collateral = manager.getMarketCollateral(marketId);
     collateral.safeTransfer(msg.sender, amount);
+
+    emit PositionRedeemed(msg.sender, marketId, address(collateral), uint8(uint256(outcome)), amount);
   }
 
   /// @notice Redeem positions from a voided market using admin-specified payout ratios.
@@ -64,6 +76,8 @@ contract ConditionalTokens is ERC1155, ReentrancyGuard {
 
     (uint256 outcome0Payout, uint256 outcome1Payout) = manager.getVoidedPayouts(marketId);
     require(outcome0Payout + outcome1Payout == 1e18, "invalid payout ratios");
+
+    IERC20 collateral = manager.getMarketCollateral(marketId);
 
     uint256 outcome0Id = getTokenId(marketId, 0);
     uint256 outcome1Id = getTokenId(marketId, 1);
@@ -76,17 +90,35 @@ contract ConditionalTokens is ERC1155, ReentrancyGuard {
     if (outcome0Balance > 0) {
       _burn(msg.sender, outcome0Id, outcome0Balance);
       totalPayout += (outcome0Balance * outcome0Payout) / 1e18;
+      emit VoidedPositionRedeemed(msg.sender, marketId, address(collateral), 0, outcome0Balance);
     }
 
     if (outcome1Balance > 0) {
       _burn(msg.sender, outcome1Id, outcome1Balance);
       totalPayout += (outcome1Balance * outcome1Payout) / 1e18;
+      emit VoidedPositionRedeemed(msg.sender, marketId, address(collateral), 1, outcome1Balance);
     }
 
     require(totalPayout > 0, "zero payout");
 
-    IERC20 collateral = manager.getMarketCollateral(marketId);
     collateral.safeTransfer(msg.sender, totalPayout);
+  }
+
+  /// @notice Burn the caller's losing outcome tokens after resolution. Reverts for voided markets or if the caller holds no losing balance.
+  function prunePosition(uint256 marketId) external nonReentrant {
+    int256 resolvedOutcome = manager.getMarketResolvedOutcome(marketId);
+    require(resolvedOutcome == 0 || resolvedOutcome == 1, "not resolved");
+
+    uint8 losingOutcomeId = resolvedOutcome == 0 ? 1 : 0;
+    uint256 losingTokenId = getTokenId(marketId, losingOutcomeId);
+    uint256 amount = balanceOf(msg.sender, losingTokenId);
+    require(amount > 0, "no losing balance");
+
+    IERC20 collateral = manager.getMarketCollateral(marketId);
+
+    _burn(msg.sender, losingTokenId, amount);
+
+    emit PositionPruned(msg.sender, marketId, address(collateral), losingOutcomeId, amount);
   }
 
   function getTokenId(uint256 marketId, uint256 outcome) public pure returns (uint256) {

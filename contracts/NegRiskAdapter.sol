@@ -351,7 +351,7 @@ contract NegRiskAdapter is ReentrancyGuard, ERC1155Holder {
         uint256 noTokenId = conditionalTokens.getTokenId(marketId, 1);
         uint256 balance = conditionalTokens.balanceOf(address(this), noTokenId);
         if (balance > 0) {
-          conditionalTokens.redeemPositions(marketId);
+          conditionalTokens.redeemPosition(marketId);
         }
       }
       // If outcome == 0 (YES won), our NO tokens are worthless, nothing to redeem
