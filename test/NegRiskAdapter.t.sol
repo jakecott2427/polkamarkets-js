@@ -340,7 +340,7 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
   // =========================================================================
 
   function testCrossMarketMatch() public {
-    (bytes32 eventId, uint256[] memory marketIds) = _createThreeOutcomeEvent();
+    (, uint256[] memory marketIds) = _createThreeOutcomeEvent();
     uint256 amount = 100 ether;
 
     // Set fees for all markets
@@ -392,7 +392,7 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
   }
 
   function testCrossMarketMatchPriceSumNot1Reverts() public {
-    (bytes32 eventId, uint256[] memory marketIds) = _createThreeOutcomeEvent();
+    (, uint256[] memory marketIds) = _createThreeOutcomeEvent();
 
     // Prices don't sum to 1
     uint256 price0 = (45 * ONE) / 100;
