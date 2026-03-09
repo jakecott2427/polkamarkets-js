@@ -251,7 +251,7 @@ contract FeeModuleTest is Test {
     function testSetMarketFeesMakerFeeTooHighReverts() public {
         uint256 marketId = 8;
         FeeModule.FeeTier[] memory tiers = new FeeModule.FeeTier[](1);
-        tiers[0] = FeeModule.FeeTier({maxPrice: uint128(ONE), makerFeeBps: 10001, takerFeeBps: 200});
+        tiers[0] = FeeModule.FeeTier({maxPrice: uint128(ONE), makerFeeBps: 1001, takerFeeBps: 200});
 
         vm.prank(feeAdmin);
         vm.expectRevert("fee too high");
@@ -261,11 +261,24 @@ contract FeeModuleTest is Test {
     function testSetMarketFeesTakerFeeTooHighReverts() public {
         uint256 marketId = 9;
         FeeModule.FeeTier[] memory tiers = new FeeModule.FeeTier[](1);
-        tiers[0] = FeeModule.FeeTier({maxPrice: uint128(ONE), makerFeeBps: 100, takerFeeBps: 10001});
+        tiers[0] = FeeModule.FeeTier({maxPrice: uint128(ONE), makerFeeBps: 100, takerFeeBps: 1001});
 
         vm.prank(feeAdmin);
         vm.expectRevert("fee too high");
         feeModule.setMarketFees(marketId, tiers);
+    }
+
+    function testSetMarketFeesAtMaxSucceeds() public {
+        uint256 marketId = 99;
+        FeeModule.FeeTier[] memory tiers = new FeeModule.FeeTier[](1);
+        tiers[0] = FeeModule.FeeTier({maxPrice: uint128(ONE), makerFeeBps: 1000, takerFeeBps: 1000});
+
+        vm.prank(feeAdmin);
+        feeModule.setMarketFees(marketId, tiers);
+
+        FeeModule.FeeTier[] memory stored = feeModule.getMarketFees(marketId);
+        assertEq(stored[0].makerFeeBps, 1000);
+        assertEq(stored[0].takerFeeBps, 1000);
     }
 
     function testSetMarketFeesNonFeeAdminReverts() public {
