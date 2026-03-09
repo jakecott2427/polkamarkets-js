@@ -65,6 +65,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
     );
   uint256 private constant ONE = 1e18;
   uint256 private constant BPS = 10000;
+  uint256 private constant CALLBACK_GAS_LIMIT = 100_000;
 
   AdminRegistry public registry;
   IMyriadMarketManager public manager;
@@ -289,7 +290,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
     // Distribute YES tokens (fillAmount per outcome) to each buyer
     for (uint256 i = 0; i < orders.length; i++) {
       uint256 tokenId = conditionalTokens.getTokenId(orders[i].marketId, 0);
-      conditionalTokens.safeTransferFrom(address(this), orders[i].trader, tokenId, fillAmount, "");
+      _safeTransferWithGasCap(address(this), orders[i].trader, tokenId, fillAmount);
 
       bytes32 orderHash = hashOrder(orders[i]);
       filledAmounts[orderHash] += fillAmount;
@@ -411,6 +412,26 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
     require(feeConfig.takerFeeBps <= BPS, "taker fee");
   }
 
+  /// @dev Gas-capped ERC-1155 transfer to an arbitrary trader.
+  ///      Caps total gas for the safeTransferFrom call so that the recipient's
+  ///      onERC1155Received callback cannot consume unbounded gas (EIP-7702 griefing).
+  function _safeTransferWithGasCap(
+    address from,
+    address to,
+    uint256 id,
+    uint256 amount
+  ) internal {
+    (bool success, bytes memory returndata) = address(conditionalTokens).call{gas: CALLBACK_GAS_LIMIT}(
+      abi.encodeCall(conditionalTokens.safeTransferFrom, (from, to, id, amount, ""))
+    );
+    if (!success) {
+      if (returndata.length > 0) {
+        assembly { revert(add(returndata, 32), mload(returndata)) }
+      }
+      revert("transfer failed");
+    }
+  }
+
   /// @dev Direct match: BUY vs SELL (same outcome).
   ///      Buyer pays notional + buyerFee, receives full fillAmount shares.
   ///      Seller provides fillAmount shares, receives notional - sellerFee.
@@ -452,12 +473,11 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
     collateral.safeTransferFrom(buyer, address(this), notional + buyerFee);
 
     // Full shares transfer
-    conditionalTokens.safeTransferFrom(
+    _safeTransferWithGasCap(
       seller,
       buyer,
       conditionalTokens.getTokenId(maker.marketId, maker.outcomeId),
-      fillAmount,
-      ""
+      fillAmount
     );
 
     // Seller receives notional - fee
@@ -503,13 +523,13 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
     conditionalTokens.splitPosition(maker.marketId, fillAmount);
 
     // Each buyer receives fillAmount shares of their outcome token
-    conditionalTokens.safeTransferFrom(
+    _safeTransferWithGasCap(
       address(this), outcome0Order.trader,
-      conditionalTokens.getTokenId(maker.marketId, 0), fillAmount, ""
+      conditionalTokens.getTokenId(maker.marketId, 0), fillAmount
     );
-    conditionalTokens.safeTransferFrom(
+    _safeTransferWithGasCap(
       address(this), outcome1Order.trader,
-      conditionalTokens.getTokenId(maker.marketId, 1), fillAmount, ""
+      conditionalTokens.getTokenId(maker.marketId, 1), fillAmount
     );
 
     // Fees to FeeModule
