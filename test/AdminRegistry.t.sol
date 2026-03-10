@@ -279,4 +279,21 @@ contract AdminRegistryTest is Test {
         assertFalse(registry.hasRole(registry.DEFAULT_ADMIN_ROLE(), alice));
         assertFalse(registry.hasRole(registry.DEFAULT_ADMIN_ROLE(), admin));
     }
+
+    function testAcceptAdminRevokesAllRolesFromOldAdmin() public {
+        registry.grantRole(registry.MARKET_ADMIN_ROLE(), admin);
+        registry.grantRole(registry.OPERATOR_ROLE(), admin);
+        registry.grantRole(registry.FEE_ADMIN_ROLE(), admin);
+        registry.grantRole(registry.RESOLUTION_ADMIN_ROLE(), admin);
+
+        registry.proposeAdmin(alice);
+        vm.prank(alice);
+        registry.acceptAdmin();
+
+        assertFalse(registry.hasRole(registry.DEFAULT_ADMIN_ROLE(), admin));
+        assertFalse(registry.hasRole(registry.MARKET_ADMIN_ROLE(), admin));
+        assertFalse(registry.hasRole(registry.OPERATOR_ROLE(), admin));
+        assertFalse(registry.hasRole(registry.FEE_ADMIN_ROLE(), admin));
+        assertFalse(registry.hasRole(registry.RESOLUTION_ADMIN_ROLE(), admin));
+    }
 }
