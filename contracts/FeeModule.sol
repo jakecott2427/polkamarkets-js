@@ -151,7 +151,7 @@ contract FeeModule is Initializable, UUPSUpgradeable {
   function _lookupFees(uint256 marketId, uint256 price) internal view returns (uint16 makerBps, uint16 takerBps) {
     FeeTier[] storage tiers = _marketFees[marketId];
     for (uint256 i = 0; i < tiers.length; i++) {
-      if (price < tiers[i].maxPrice) {
+      if (price <= tiers[i].maxPrice) {
         return (uint16(tiers[i].makerFeeBps), uint16(tiers[i].takerFeeBps));
       }
     }

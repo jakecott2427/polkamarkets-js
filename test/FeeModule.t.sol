@@ -323,15 +323,30 @@ contract FeeModuleTest is Test {
         vm.prank(feeAdmin);
         feeModule.setMarketFees(marketId, tiers);
 
-        // price strictly less than tier[0].maxPrice => tier[0]
+        // price below tier[0].maxPrice => tier[0]
         (uint16 m0, uint16 t0) = feeModule.getFeesAtPrice(marketId, ONE / 2 - 1);
         assertEq(m0, 50);
         assertEq(t0, 100);
 
-        // price == tier[0].maxPrice => NOT less than, falls through to tier[1]
+        // price == tier[0].maxPrice => matches tier[0] (inclusive boundary)
         (uint16 m1, uint16 t1) = feeModule.getFeesAtPrice(marketId, ONE / 2);
-        assertEq(m1, 150);
-        assertEq(t1, 250);
+        assertEq(m1, 50);
+        assertEq(t1, 100);
+
+        // price above tier[0].maxPrice => falls through to tier[1]
+        (uint16 m2, uint16 t2) = feeModule.getFeesAtPrice(marketId, ONE / 2 + 1);
+        assertEq(m2, 150);
+        assertEq(t2, 250);
+    }
+
+    function testGetFeesAtPriceAtOneMatchesHighestTier() public {
+        uint256 marketId = 24;
+        vm.prank(feeAdmin);
+        feeModule.setMarketFees(marketId, _singleTier(uint128(ONE), 100, 200));
+
+        (uint16 makerBps, uint16 takerBps) = feeModule.getFeesAtPrice(marketId, ONE);
+        assertEq(makerBps, 100);
+        assertEq(takerBps, 200);
     }
 
     function testGetFeesAtPriceNoTiersReturnsZero() public view {
@@ -347,7 +362,7 @@ contract FeeModuleTest is Test {
         vm.prank(feeAdmin);
         feeModule.setMarketFees(marketId, _singleTier(uint128(ONE / 2), 100, 200));
 
-        // price == ONE / 2: not strictly less than maxPrice (ONE/2), so no tier matches
+        // price = ONE is above maxPrice (ONE/2), so no tier matches
         (uint16 makerBps, uint16 takerBps) = feeModule.getFeesAtPrice(marketId, ONE);
         assertEq(makerBps, 0);
         assertEq(takerBps, 0);
