@@ -214,7 +214,10 @@ contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardUpgradea
     Market storage market = markets[marketId];
     require(market.id == marketId, "!m");
     require(market.state != MarketState.resolved, "resolved");
-    require(!market.negRisk, "use resolveEvent for neg risk");
+
+    if (market.negRisk) {
+      require(msg.sender == negRiskAdapter, "use adapter for neg risk");
+    }
 
     market.resolvedOutcome = -1;
     market.state = MarketState.resolved;

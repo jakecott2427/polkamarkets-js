@@ -482,6 +482,151 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
   }
 
   // =========================================================================
+  // Void event
+  // =========================================================================
+
+  function testVoidEvent5050() public {
+    (bytes32 eventId, uint256[] memory marketIds) = _createThreeOutcomeEvent();
+    uint256 amount = 100 ether;
+
+    collateral.mint(alice, amount);
+    vm.startPrank(alice);
+    collateral.approve(address(adapter), amount);
+    adapter.splitPosition(eventId, 0, amount);
+    vm.stopPrank();
+
+    uint256[] memory yesPayouts = new uint256[](3);
+    yesPayouts[0] = ONE / 2;
+    yesPayouts[1] = ONE / 2;
+    yesPayouts[2] = ONE / 2;
+
+    adapter.voidEvent(eventId, yesPayouts);
+
+    (, bool resolved, int256 winningIndex,,) = adapter.getEvent(eventId);
+    assertTrue(resolved);
+    assertEq(winningIndex, -2);
+
+    for (uint256 i = 0; i < 3; i++) {
+      assertEq(manager.getMarketResolvedOutcome(marketIds[i]), -1);
+    }
+
+    // Alice redeems voided position for market 0 (has YES + NO)
+    vm.prank(alice);
+    conditionalTokens.redeemVoided(marketIds[0]);
+
+    uint256 aliceWcol = wcol.balanceOf(alice);
+    assertEq(aliceWcol, amount);
+    vm.prank(alice);
+    wcol.unwrap(amount);
+    assertEq(collateral.balanceOf(alice), amount);
+  }
+
+  function testVoidEventAsymmetricPayouts() public {
+    (bytes32 eventId, uint256[] memory marketIds) = _createThreeOutcomeEvent();
+    uint256 amount = 100 ether;
+
+    // Alice splits in outcome 0 and converts → YES(0), YES(1), YES(2)
+    collateral.mint(alice, amount);
+    vm.startPrank(alice);
+    collateral.approve(address(adapter), amount);
+    adapter.splitPosition(eventId, 0, amount);
+    conditionalTokens.setApprovalForAll(address(adapter), true);
+    adapter.convertPositions(eventId, 0, amount);
+    vm.stopPrank();
+
+    uint256[] memory yesPayouts = new uint256[](3);
+    yesPayouts[0] = (60 * ONE) / 100;
+    yesPayouts[1] = (30 * ONE) / 100;
+    yesPayouts[2] = (10 * ONE) / 100;
+
+    adapter.voidEvent(eventId, yesPayouts);
+
+    // Alice holds YES for all 3 markets, redeem each
+    for (uint256 i = 0; i < 3; i++) {
+      vm.prank(alice);
+      conditionalTokens.redeemVoided(marketIds[i]);
+    }
+
+    uint256 aliceWcol = wcol.balanceOf(alice);
+    uint256 expected = (amount * 60) / 100 + (amount * 30) / 100 + (amount * 10) / 100;
+    assertEq(aliceWcol, expected);
+  }
+
+  function testVoidEventRedeemNOPositions() public {
+    (bytes32 eventId, uint256[] memory marketIds) = _createThreeOutcomeEvent();
+    uint256 amount = 100 ether;
+
+    // Alice splits and converts → adapter holds NO tokens + minted wcol
+    collateral.mint(alice, amount);
+    vm.startPrank(alice);
+    collateral.approve(address(adapter), amount);
+    adapter.splitPosition(eventId, 0, amount);
+    conditionalTokens.setApprovalForAll(address(adapter), true);
+    adapter.convertPositions(eventId, 0, amount);
+    vm.stopPrank();
+
+    uint256 mintedBefore = adapter.mintedWcolPerEvent(eventId);
+    assertGt(mintedBefore, 0);
+
+    uint256[] memory yesPayouts = new uint256[](3);
+    yesPayouts[0] = (50 * ONE) / 100;
+    yesPayouts[1] = (50 * ONE) / 100;
+    yesPayouts[2] = (50 * ONE) / 100;
+
+    adapter.voidEvent(eventId, yesPayouts);
+
+    // Adapter redeems its NO positions from voided markets
+    adapter.redeemNOPositions(eventId);
+    assertEq(adapter.mintedWcolPerEvent(eventId), 0);
+    assertTrue(adapter.noPositionsRedeemed(eventId));
+  }
+
+  function testVoidEventLengthMismatchReverts() public {
+    (bytes32 eventId,) = _createThreeOutcomeEvent();
+
+    uint256[] memory yesPayouts = new uint256[](2);
+    yesPayouts[0] = ONE / 2;
+    yesPayouts[1] = ONE / 2;
+
+    vm.expectRevert("length mismatch");
+    adapter.voidEvent(eventId, yesPayouts);
+  }
+
+  function testVoidEventAlreadyResolvedReverts() public {
+    (bytes32 eventId,) = _createThreeOutcomeEvent();
+    vm.warp(block.timestamp + 2 days);
+    adapter.resolveEvent(eventId, 0);
+
+    uint256[] memory yesPayouts = new uint256[](3);
+    yesPayouts[0] = ONE / 2;
+    yesPayouts[1] = ONE / 2;
+    yesPayouts[2] = ONE / 2;
+
+    vm.expectRevert("already resolved");
+    adapter.voidEvent(eventId, yesPayouts);
+  }
+
+  function testVoidEventNotResolutionAdminReverts() public {
+    (bytes32 eventId,) = _createThreeOutcomeEvent();
+
+    uint256[] memory yesPayouts = new uint256[](3);
+    yesPayouts[0] = ONE / 2;
+    yesPayouts[1] = ONE / 2;
+    yesPayouts[2] = ONE / 2;
+
+    vm.prank(alice);
+    vm.expectRevert("not resolution admin");
+    adapter.voidEvent(eventId, yesPayouts);
+  }
+
+  function testAdminVoidNegRiskDirectlyReverts() public {
+    (, uint256[] memory marketIds) = _createThreeOutcomeEvent();
+
+    vm.expectRevert("use adapter for neg risk");
+    manager.adminVoidMarket(marketIds[0], ONE / 2, ONE / 2);
+  }
+
+  // =========================================================================
   // Access control tests
   // =========================================================================
 
