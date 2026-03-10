@@ -73,7 +73,7 @@ contract ConditionalTokens is ERC1155, ReentrancyGuard {
   /// @notice Redeem positions from a voided market using admin-specified payout ratios.
   function redeemVoided(uint256 marketId) external nonReentrant {
     int256 outcome = manager.getMarketResolvedOutcome(marketId);
-    require(outcome == Outcomes.VOID, "not voided");
+    require(outcome == Outcomes.VOIDED, "not voided");
 
     (uint256 outcome0Payout, uint256 outcome1Payout) = manager.getVoidedPayouts(marketId);
     require(outcome0Payout + outcome1Payout == 1e18, "invalid payout ratios");

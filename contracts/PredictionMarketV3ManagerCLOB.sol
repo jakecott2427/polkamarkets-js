@@ -174,7 +174,7 @@ contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardUpgradea
 
     (int256 outcome, bool resolved) = IMarketOracle(market.oracle).getResult(marketId);
     require(resolved, "oracle: not resolved");
-    require(outcome == int256(Outcomes.YES) || outcome == int256(Outcomes.NO) || outcome == Outcomes.VOID, "invalid outcome");
+    require(outcome == int256(Outcomes.YES) || outcome == int256(Outcomes.NO) || outcome == Outcomes.VOIDED, "invalid outcome");
 
     market.resolvedOutcome = outcome;
     market.state = MarketState.resolved;
@@ -217,7 +217,7 @@ contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardUpgradea
     require(market.state != MarketState.resolved, "resolved");
     require(!market.negRisk, "use resolveEvent for neg risk");
 
-    market.resolvedOutcome = Outcomes.VOID;
+    market.resolvedOutcome = Outcomes.VOIDED;
     market.state = MarketState.resolved;
     voidedPayouts[marketId] = [outcome0Payout, outcome1Payout];
 
@@ -338,7 +338,7 @@ contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardUpgradea
   function getVoidedPayouts(uint256 marketId) external view override returns (uint256 outcome0Payout, uint256 outcome1Payout) {
     Market storage market = markets[marketId];
     require(market.id == marketId, "!m");
-    require(market.resolvedOutcome == Outcomes.VOID, "not voided");
+    require(market.resolvedOutcome == Outcomes.VOIDED, "not voided");
 
     outcome0Payout = voidedPayouts[marketId][0];
     outcome1Payout = voidedPayouts[marketId][1];
