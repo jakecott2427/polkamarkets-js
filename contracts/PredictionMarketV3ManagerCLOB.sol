@@ -129,7 +129,8 @@ contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardUpgradea
   function createNegRiskMarket(
     CreateMarketParams calldata params,
     IERC20 collateralOverride,
-    bytes32 eventId
+    bytes32 eventId,
+    address creator
   ) external nonReentrant returns (uint256 marketId) {
     require(msg.sender == negRiskAdapter, "not adapter");
     require(params.closesAt > block.timestamp, "close in past");
@@ -150,7 +151,7 @@ contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardUpgradea
     market.outcome0TokenId = _getTokenId(marketId, 0);
     market.outcome1TokenId = _getTokenId(marketId, 1);
     market.feeModule = params.feeModule;
-    market.creator = msg.sender;
+    market.creator = creator;
     market.oracle = params.oracle;
     market.eventId = eventId;
     market.negRisk = true;
@@ -159,7 +160,7 @@ contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardUpgradea
       IMarketOracle(params.oracle).initialize(marketId, params.oracleData);
     }
 
-    emit MarketCreated(msg.sender, marketId, params.question, params.image, address(collateralOverride));
+    emit MarketCreated(creator, marketId, params.question, params.image, address(collateralOverride));
   }
 
   /// @notice Permissionless resolution via the market's oracle.

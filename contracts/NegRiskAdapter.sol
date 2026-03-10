@@ -129,7 +129,8 @@ contract NegRiskAdapter is ReentrancyGuard, ERC1155Holder {
       uint256 marketId = manager.createNegRiskMarket(
         marketParams[i],
         IERC20(address(wcol)),
-        eventId
+        eventId,
+        msg.sender
       );
       evt.marketIds.push(marketId);
     }
