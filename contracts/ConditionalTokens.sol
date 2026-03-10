@@ -7,6 +7,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import "./AdminRegistry.sol";
 import "./IMyriadMarketManager.sol";
+import "./Outcomes.sol";
 
 /// @title ConditionalTokens
 /// @notice ERC1155 outcome positions for binary (outcome 0 / outcome 1) markets.
@@ -35,8 +36,8 @@ contract ConditionalTokens is ERC1155, ReentrancyGuard {
     IERC20 collateral = manager.getMarketCollateral(marketId);
     collateral.safeTransferFrom(msg.sender, address(this), amount);
 
-    _mint(msg.sender, getTokenId(marketId, 0), amount, "");
-    _mint(msg.sender, getTokenId(marketId, 1), amount, "");
+    _mint(msg.sender, getTokenId(marketId, Outcomes.YES), amount, "");
+    _mint(msg.sender, getTokenId(marketId, Outcomes.NO), amount, "");
 
     emit PositionSplit(msg.sender, marketId, address(collateral), amount);
   }
@@ -44,8 +45,8 @@ contract ConditionalTokens is ERC1155, ReentrancyGuard {
   function mergePositions(uint256 marketId, uint256 amount) external nonReentrant {
     require(amount > 0, "amount 0");
 
-    _burn(msg.sender, getTokenId(marketId, 0), amount);
-    _burn(msg.sender, getTokenId(marketId, 1), amount);
+    _burn(msg.sender, getTokenId(marketId, Outcomes.YES), amount);
+    _burn(msg.sender, getTokenId(marketId, Outcomes.NO), amount);
 
     IERC20 collateral = manager.getMarketCollateral(marketId);
     collateral.safeTransfer(msg.sender, amount);
@@ -55,7 +56,7 @@ contract ConditionalTokens is ERC1155, ReentrancyGuard {
 
   function redeemPosition(uint256 marketId) external nonReentrant {
     int256 outcome = manager.getMarketResolvedOutcome(marketId);
-    require(outcome == 0 || outcome == 1, "not resolved");
+    require(outcome == int256(Outcomes.YES) || outcome == int256(Outcomes.NO), "not resolved");
 
     uint256 tokenId = getTokenId(marketId, uint256(outcome));
     uint256 amount = balanceOf(msg.sender, tokenId);
@@ -72,15 +73,15 @@ contract ConditionalTokens is ERC1155, ReentrancyGuard {
   /// @notice Redeem positions from a voided market using admin-specified payout ratios.
   function redeemVoided(uint256 marketId) external nonReentrant {
     int256 outcome = manager.getMarketResolvedOutcome(marketId);
-    require(outcome == -1, "not voided");
+    require(outcome == Outcomes.VOID, "not voided");
 
     (uint256 outcome0Payout, uint256 outcome1Payout) = manager.getVoidedPayouts(marketId);
     require(outcome0Payout + outcome1Payout == 1e18, "invalid payout ratios");
 
     IERC20 collateral = manager.getMarketCollateral(marketId);
 
-    uint256 outcome0Id = getTokenId(marketId, 0);
-    uint256 outcome1Id = getTokenId(marketId, 1);
+    uint256 outcome0Id = getTokenId(marketId, Outcomes.YES);
+    uint256 outcome1Id = getTokenId(marketId, Outcomes.NO);
     uint256 outcome0Balance = balanceOf(msg.sender, outcome0Id);
     uint256 outcome1Balance = balanceOf(msg.sender, outcome1Id);
     require(outcome0Balance > 0 || outcome1Balance > 0, "no balance");
@@ -90,13 +91,13 @@ contract ConditionalTokens is ERC1155, ReentrancyGuard {
     if (outcome0Balance > 0) {
       _burn(msg.sender, outcome0Id, outcome0Balance);
       totalPayout += (outcome0Balance * outcome0Payout) / 1e18;
-      emit VoidedPositionRedeemed(msg.sender, marketId, address(collateral), 0, outcome0Balance);
+      emit VoidedPositionRedeemed(msg.sender, marketId, address(collateral), uint8(Outcomes.YES), outcome0Balance);
     }
 
     if (outcome1Balance > 0) {
       _burn(msg.sender, outcome1Id, outcome1Balance);
       totalPayout += (outcome1Balance * outcome1Payout) / 1e18;
-      emit VoidedPositionRedeemed(msg.sender, marketId, address(collateral), 1, outcome1Balance);
+      emit VoidedPositionRedeemed(msg.sender, marketId, address(collateral), uint8(Outcomes.NO), outcome1Balance);
     }
 
     require(totalPayout > 0, "zero payout");
@@ -107,9 +108,9 @@ contract ConditionalTokens is ERC1155, ReentrancyGuard {
   /// @notice Burn the caller's losing outcome tokens after resolution. Reverts for voided markets or if the caller holds no losing balance.
   function prunePosition(uint256 marketId) external nonReentrant {
     int256 resolvedOutcome = manager.getMarketResolvedOutcome(marketId);
-    require(resolvedOutcome == 0 || resolvedOutcome == 1, "not resolved");
+    require(resolvedOutcome == int256(Outcomes.YES) || resolvedOutcome == int256(Outcomes.NO), "not resolved");
 
-    uint8 losingOutcomeId = resolvedOutcome == 0 ? 1 : 0;
+    uint8 losingOutcomeId = resolvedOutcome == int256(Outcomes.YES) ? uint8(Outcomes.NO) : uint8(Outcomes.YES);
     uint256 losingTokenId = getTokenId(marketId, losingOutcomeId);
     uint256 amount = balanceOf(msg.sender, losingTokenId);
     require(amount > 0, "no losing balance");
