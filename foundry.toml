@@ -8,4 +8,4 @@ optimizer = true
 optimizer-runs = 1
 via-ir = true
 fs_permissions = [{ access = "read-write", path = "./" }]
-evm_version = "cancun"
+evm_version = "paris"
