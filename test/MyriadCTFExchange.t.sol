@@ -376,7 +376,7 @@ contract MyriadCTFExchangeTest is Test {
         bytes memory badSig  = _signOrder(m, thirdPk);
         bytes memory takerSig = _signOrder(t, takerPk);
 
-        vm.expectRevert("signer mismatch");
+        vm.expectRevert("invalid signature");
         exchange.matchOrdersWithFees(m, badSig, t, takerSig, amount);
     }
 
@@ -865,7 +865,6 @@ contract MyriadCTFExchangeTest is Test {
         uint256 makerPrice = (60 * ONE) / 100;
         uint256 takerPrice = (40 * ONE) / 100;
 
-        // Maker signs order as a normal EOA
         MyriadCTFExchange.Order memory m = _buildOrder(
             maker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, makerPrice, 900
         );
@@ -877,7 +876,6 @@ contract MyriadCTFExchangeTest is Test {
         bytes memory takerSig = _signOrder(t, takerPk);
 
         // Simulate EIP-7702: etch griefing code onto maker's EOA address.
-        // Now maker.code.length > 0, so safeTransferFrom will call onERC1155Received.
         GasGriefingWallet griefer = new GasGriefingWallet();
         vm.etch(maker, address(griefer).code);
 
