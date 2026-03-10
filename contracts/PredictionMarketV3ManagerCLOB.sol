@@ -249,7 +249,7 @@ contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardUpgradea
     emit MarketOracleUpdated(marketId, oldOracle, newOracle);
   }
 
-  function setClosesAt(uint256 marketId, uint256 newClosesAt) external nonReentrant {
+  function adminSetClosesAt(uint256 marketId, uint256 newClosesAt) external nonReentrant {
     require(registry.hasRole(registry.MARKET_ADMIN_ROLE(), msg.sender), "not market admin");
     require(newClosesAt >= block.timestamp, "close in past");
 

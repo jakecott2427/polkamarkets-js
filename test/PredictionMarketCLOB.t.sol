@@ -891,12 +891,12 @@ contract PredictionMarketCLOBTest is Test {
 
   function testSetClosesAt() public {
     uint256 newClosesAt = block.timestamp + 3 days;
-    manager.setClosesAt(marketId, newClosesAt);
+    manager.adminSetClosesAt(marketId, newClosesAt);
     assertEq(manager.getMarketClosesAt(marketId), newClosesAt);
   }
 
   function testSetClosesAtToNowAndVoid() public {
-    manager.setClosesAt(marketId, block.timestamp);
+    manager.adminSetClosesAt(marketId, block.timestamp);
 
     manager.adminVoidMarket(marketId, (50 * ONE) / 100, (50 * ONE) / 100);
     assertEq(uint8(manager.getMarketState(marketId)), uint8(IMyriadMarketManager.MarketState.resolved));
@@ -905,7 +905,7 @@ contract PredictionMarketCLOBTest is Test {
   function testSetClosesAtPastReverts() public {
     vm.warp(block.timestamp + 1 hours);
     vm.expectRevert("close in past");
-    manager.setClosesAt(marketId, block.timestamp - 1);
+    manager.adminSetClosesAt(marketId, block.timestamp - 1);
   }
 
   function testSetClosesAtResolvedReverts() public {
@@ -913,13 +913,13 @@ contract PredictionMarketCLOBTest is Test {
     manager.adminResolveMarket(marketId, 0);
 
     vm.expectRevert("resolved");
-    manager.setClosesAt(marketId, block.timestamp + 1 days);
+    manager.adminSetClosesAt(marketId, block.timestamp + 1 days);
   }
 
   function testSetClosesAtNotAdminReverts() public {
     vm.prank(maker);
     vm.expectRevert("not market admin");
-    manager.setClosesAt(marketId, block.timestamp + 2 days);
+    manager.adminSetClosesAt(marketId, block.timestamp + 2 days);
   }
 
   function testFillZeroReverts() public {
