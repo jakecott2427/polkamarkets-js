@@ -9,6 +9,7 @@ import "./AdminRegistry.sol";
 import "./PredictionMarketV3ManagerCLOB.sol";
 import "./ConditionalTokens.sol";
 import "./WrappedCollateral.sol";
+import "./Outcomes.sol";
 
 /// @title NegRiskAdapter
 /// @notice Groups binary CLOB markets into mutually exclusive events.
@@ -162,8 +163,8 @@ contract NegRiskAdapter is ReentrancyGuard, ERC1155Holder {
     conditionalTokens.splitPosition(marketId, amount);
 
     // Transfer YES + NO tokens to user
-    uint256 yesTokenId = conditionalTokens.getTokenId(marketId, 0);
-    uint256 noTokenId = conditionalTokens.getTokenId(marketId, 1);
+    uint256 yesTokenId = conditionalTokens.getTokenId(marketId, Outcomes.YES);
+    uint256 noTokenId = conditionalTokens.getTokenId(marketId, Outcomes.NO);
     conditionalTokens.safeTransferFrom(address(this), msg.sender, yesTokenId, amount, "");
     conditionalTokens.safeTransferFrom(address(this), msg.sender, noTokenId, amount, "");
 
@@ -182,8 +183,8 @@ contract NegRiskAdapter is ReentrancyGuard, ERC1155Holder {
     require(amount > 0, "amount 0");
 
     uint256 marketId = evt.marketIds[outcomeIndex];
-    uint256 yesTokenId = conditionalTokens.getTokenId(marketId, 0);
-    uint256 noTokenId = conditionalTokens.getTokenId(marketId, 1);
+    uint256 yesTokenId = conditionalTokens.getTokenId(marketId, Outcomes.YES);
+    uint256 noTokenId = conditionalTokens.getTokenId(marketId, Outcomes.NO);
 
     // Take YES + NO from user
     conditionalTokens.safeTransferFrom(msg.sender, address(this), yesTokenId, amount, "");
@@ -217,7 +218,7 @@ contract NegRiskAdapter is ReentrancyGuard, ERC1155Holder {
 
     uint256 n = evt.outcomeCount;
     uint256 noMarketId = evt.marketIds[noOutcomeIndex];
-    uint256 noTokenId = conditionalTokens.getTokenId(noMarketId, 1);
+    uint256 noTokenId = conditionalTokens.getTokenId(noMarketId, Outcomes.NO);
 
     // Take NO(noOutcomeIndex) from caller
     conditionalTokens.safeTransferFrom(msg.sender, address(this), noTokenId, amount, "");
@@ -235,7 +236,7 @@ contract NegRiskAdapter is ReentrancyGuard, ERC1155Holder {
       conditionalTokens.splitPosition(marketId, amount);
 
       // Send YES to caller
-      uint256 yesTokenId = conditionalTokens.getTokenId(marketId, 0);
+      uint256 yesTokenId = conditionalTokens.getTokenId(marketId, Outcomes.YES);
       conditionalTokens.safeTransferFrom(address(this), msg.sender, yesTokenId, amount, "");
 
       // Adapter retains the NO token (backing for the minted wcol)
@@ -272,7 +273,7 @@ contract NegRiskAdapter is ReentrancyGuard, ERC1155Holder {
     {
       uint256 marketId = evt.marketIds[0];
       conditionalTokens.splitPosition(marketId, amount);
-      uint256 yesTokenId = conditionalTokens.getTokenId(marketId, 0);
+      uint256 yesTokenId = conditionalTokens.getTokenId(marketId, Outcomes.YES);
       conditionalTokens.safeTransferFrom(address(this), recipient, yesTokenId, amount, "");
     }
 
@@ -285,7 +286,7 @@ contract NegRiskAdapter is ReentrancyGuard, ERC1155Holder {
       for (uint256 i = 1; i < n; i++) {
         uint256 marketId = evt.marketIds[i];
         conditionalTokens.splitPosition(marketId, amount);
-        uint256 yesTokenId = conditionalTokens.getTokenId(marketId, 0);
+        uint256 yesTokenId = conditionalTokens.getTokenId(marketId, Outcomes.YES);
         conditionalTokens.safeTransferFrom(address(this), recipient, yesTokenId, amount, "");
       }
     }
@@ -311,17 +312,15 @@ contract NegRiskAdapter is ReentrancyGuard, ERC1155Holder {
     evt.winningIndex = winningIndex;
 
     if (winningIndex == -1) {
-      // "Other" wins: all markets resolve with outcome 1 (NO wins)
       for (uint256 i = 0; i < n; i++) {
-        manager.adminResolveMarket(evt.marketIds[i], 1);
+        manager.adminResolveMarket(evt.marketIds[i], int256(Outcomes.NO));
       }
     } else {
-      // Named outcome wins
       for (uint256 i = 0; i < n; i++) {
         if (int256(i) == winningIndex) {
-          manager.adminResolveMarket(evt.marketIds[i], 0); // YES wins
+          manager.adminResolveMarket(evt.marketIds[i], int256(Outcomes.YES));
         } else {
-          manager.adminResolveMarket(evt.marketIds[i], 1); // NO wins
+          manager.adminResolveMarket(evt.marketIds[i], int256(Outcomes.NO));
         }
       }
     }
@@ -346,15 +345,14 @@ contract NegRiskAdapter is ReentrancyGuard, ERC1155Holder {
       uint256 marketId = evt.marketIds[i];
       int256 outcome = manager.getMarketResolvedOutcome(marketId);
 
-      if (outcome == 1) {
-        // NO won — redeem our NO tokens
-        uint256 noTokenId = conditionalTokens.getTokenId(marketId, 1);
+      if (outcome == int256(Outcomes.NO)) {
+        uint256 noTokenId = conditionalTokens.getTokenId(marketId, Outcomes.NO);
         uint256 balance = conditionalTokens.balanceOf(address(this), noTokenId);
         if (balance > 0) {
           conditionalTokens.redeemPosition(marketId);
         }
       }
-      // If outcome == 0 (YES won), our NO tokens are worthless, nothing to redeem
+      // If outcome == YES, our NO tokens are worthless, nothing to redeem
     }
 
     uint256 wcolAfter = IERC20(address(wcol)).balanceOf(address(this));

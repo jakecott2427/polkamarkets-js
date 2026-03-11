@@ -10,6 +10,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./AdminRegistry.sol";
 import "./IMarketOracle.sol";
 import "./IMyriadMarketManager.sol";
+import "./Outcomes.sol";
 
 /// @title PredictionMarketV3ManagerCLOB
 /// @notice Market lifecycle registry for CLOB markets.
@@ -111,8 +112,8 @@ contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardUpgradea
     market.image = params.image;
     market.state = MarketState.open;
     market.resolvedOutcome = -3;
-    market.outcome0TokenId = _getTokenId(marketId, 0);
-    market.outcome1TokenId = _getTokenId(marketId, 1);
+    market.outcome0TokenId = _getTokenId(marketId, Outcomes.YES);
+    market.outcome1TokenId = _getTokenId(marketId, Outcomes.NO);
     market.feeModule = params.feeModule;
     market.creator = msg.sender;
     market.oracle = params.oracle;
@@ -147,8 +148,8 @@ contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardUpgradea
     market.image = params.image;
     market.state = MarketState.open;
     market.resolvedOutcome = -3;
-    market.outcome0TokenId = _getTokenId(marketId, 0);
-    market.outcome1TokenId = _getTokenId(marketId, 1);
+    market.outcome0TokenId = _getTokenId(marketId, Outcomes.YES);
+    market.outcome1TokenId = _getTokenId(marketId, Outcomes.NO);
     market.feeModule = params.feeModule;
     market.creator = msg.sender;
     market.oracle = params.oracle;
@@ -173,7 +174,7 @@ contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardUpgradea
 
     (int256 outcome, bool resolved) = IMarketOracle(market.oracle).getResult(marketId);
     require(resolved, "oracle: not resolved");
-    require(outcome == 0 || outcome == 1, "oracle: invalid outcome");
+    require(outcome == int256(Outcomes.YES) || outcome == int256(Outcomes.NO), "invalid outcome");
 
     market.resolvedOutcome = outcome;
     market.state = MarketState.resolved;
@@ -184,7 +185,7 @@ contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardUpgradea
 
   function adminResolveMarket(uint256 marketId, int256 outcomeId) external nonReentrant returns (int256) {
     require(registry.hasRole(registry.RESOLUTION_ADMIN_ROLE(), msg.sender), "not resolution admin");
-    require(outcomeId == 0 || outcomeId == 1, "invalid outcome");
+    require(outcomeId == int256(Outcomes.YES) || outcomeId == int256(Outcomes.NO), "invalid outcome");
 
     Market storage market = markets[marketId];
     require(market.id == marketId, "!m");
@@ -216,7 +217,7 @@ contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardUpgradea
     require(market.state != MarketState.resolved, "resolved");
     require(!market.negRisk, "use resolveEvent for neg risk");
 
-    market.resolvedOutcome = -1;
+    market.resolvedOutcome = Outcomes.VOIDED;
     market.state = MarketState.resolved;
     voidedPayouts[marketId] = [outcome0Payout, outcome1Payout];
 
@@ -337,7 +338,7 @@ contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardUpgradea
   function getVoidedPayouts(uint256 marketId) external view override returns (uint256 outcome0Payout, uint256 outcome1Payout) {
     Market storage market = markets[marketId];
     require(market.id == marketId, "!m");
-    require(market.resolvedOutcome == -1, "not voided");
+    require(market.resolvedOutcome == Outcomes.VOIDED, "not voided");
 
     outcome0Payout = voidedPayouts[marketId][0];
     outcome1Payout = voidedPayouts[marketId][1];

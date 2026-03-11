@@ -1109,7 +1109,7 @@ contract PredictionMarketCLOBTest is Test {
 
     oracle.setResult(marketId, 5, true);
 
-    vm.expectRevert("oracle: invalid outcome");
+    vm.expectRevert("invalid outcome");
     manager.resolveMarket(marketId);
   }
 
@@ -1118,7 +1118,7 @@ contract PredictionMarketCLOBTest is Test {
 
     oracle.setResult(marketId, -1, true);
 
-    vm.expectRevert("oracle: invalid outcome");
+    vm.expectRevert("invalid outcome");
     manager.resolveMarket(marketId);
   }
 
