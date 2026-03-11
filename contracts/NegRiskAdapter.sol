@@ -55,6 +55,7 @@ contract NegRiskAdapter is ReentrancyGuard, ERC1155Holder {
 
   event EventCreated(bytes32 indexed eventId, uint256 outcomeCount, uint256[] marketIds);
   event EventResolved(bytes32 indexed eventId, int256 winningIndex);
+  event EventVoided(bytes32 indexed eventId, uint256[] yesPayouts);
   event PositionsSplit(bytes32 indexed eventId, uint256 outcomeIndex, address indexed user, uint256 amount);
   event PositionsMerged(bytes32 indexed eventId, uint256 outcomeIndex, address indexed user, uint256 amount);
   event PositionsConverted(bytes32 indexed eventId, uint256 noOutcomeIndex, address indexed user, uint256 amount);
@@ -329,6 +330,33 @@ contract NegRiskAdapter is ReentrancyGuard, ERC1155Holder {
     emit EventResolved(eventId, winningIndex);
   }
 
+  /// @notice Void the event with per-market YES payouts. Each market is voided
+  ///         via adminVoidMarket; NO payout is derived as 1e18 - yesPayout.
+  /// @param eventId The event identifier.
+  /// @param yesPayouts Array of YES (outcome 0) payouts, one per market, in 1e18.
+  function voidEvent(
+    bytes32 eventId,
+    uint256[] calldata yesPayouts
+  ) external nonReentrant {
+    require(registry.hasRole(registry.RESOLUTION_ADMIN_ROLE(), msg.sender), "not resolution admin");
+
+    Event storage evt = _events[eventId];
+    require(evt.outcomeCount > 0, "event !exist");
+    require(!evt.resolved, "already resolved");
+
+    uint256 n = evt.outcomeCount;
+    require(yesPayouts.length == n, "length mismatch");
+
+    evt.resolved = true;
+    evt.winningIndex = -2;
+
+    for (uint256 i = 0; i < n; i++) {
+      manager.adminVoidMarket(evt.marketIds[i], yesPayouts[i], 1e18 - yesPayouts[i]);
+    }
+
+    emit EventVoided(eventId, yesPayouts);
+  }
+
   /// @notice After resolution, redeem the adapter's held NO positions, burn
   ///         the wcol that was minted during convert/mintAll operations, and
   ///         send any excess to treasury.
@@ -346,14 +374,16 @@ contract NegRiskAdapter is ReentrancyGuard, ERC1155Holder {
       uint256 marketId = evt.marketIds[i];
       int256 outcome = manager.getMarketResolvedOutcome(marketId);
 
-      if (outcome == int256(Outcomes.NO)) {
-        uint256 noTokenId = conditionalTokens.getTokenId(marketId, Outcomes.NO);
-        uint256 balance = conditionalTokens.balanceOf(address(this), noTokenId);
-        if (balance > 0) {
-          conditionalTokens.redeemPosition(marketId);
-        }
+      uint256 noTokenId = conditionalTokens.getTokenId(marketId, Outcomes.NO);
+      uint256 balance = conditionalTokens.balanceOf(address(this), noTokenId);
+
+      if (balance == 0) continue;
+
+      if (outcome == Outcomes.VOIDED) {
+        conditionalTokens.redeemVoided(marketId);
+      } else if (outcome == int256(Outcomes.NO)) {
+        conditionalTokens.redeemPosition(marketId);
       }
-      // If outcome == YES, our NO tokens are worthless, nothing to redeem
     }
 
     uint256 wcolAfter = IERC20(address(wcol)).balanceOf(address(this));
