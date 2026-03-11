@@ -137,6 +137,17 @@ contract ConditionalTokensTest is Test {
         ct.splitPosition(marketId, 0);
     }
 
+    function testSplitPositionPausedMarketReverts() public {
+        collateral.mint(alice, 100 ether);
+        manager.pauseMarket(marketId, true);
+
+        vm.startPrank(alice);
+        collateral.approve(address(ct), type(uint256).max);
+        vm.expectRevert("market paused");
+        ct.splitPosition(marketId, 100 ether);
+        vm.stopPrank();
+    }
+
     function testSplitPositionClosedMarketReverts() public {
         // Warp past closesAt so market transitions to closed
         vm.warp(block.timestamp + 2 days);
