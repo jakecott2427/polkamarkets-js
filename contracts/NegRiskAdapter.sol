@@ -61,6 +61,8 @@ contract NegRiskAdapter is ReentrancyGuard, ERC1155Holder {
   event PositionsConverted(bytes32 indexed eventId, uint256 noOutcomeIndex, address indexed user, uint256 amount);
   event AllYesTokensMinted(bytes32 indexed eventId, address indexed recipient, uint256 amount);
   event NOPositionsRedeemed(bytes32 indexed eventId, uint256 wcolRecovered, uint256 wcolBurned, uint256 excessToTreasury);
+  event TreasuryUpdated(address indexed oldTreasury, address indexed newTreasury);
+  event ExchangeUpdated(address indexed oldExchange, address indexed newExchange);
 
   // ─── Constructor ─────────────────────────────────────────────────────
 
@@ -93,13 +95,17 @@ contract NegRiskAdapter is ReentrancyGuard, ERC1155Holder {
   function setTreasury(address newTreasury) external {
     require(registry.hasRole(registry.DEFAULT_ADMIN_ROLE(), msg.sender), "not admin");
     require(newTreasury != address(0), "treasury 0");
+    address old = treasury;
     treasury = newTreasury;
+    emit TreasuryUpdated(old, newTreasury);
   }
 
   function setExchange(address _exchange) external {
     require(registry.hasRole(registry.DEFAULT_ADMIN_ROLE(), msg.sender), "not admin");
     require(_exchange != address(0), "exchange 0");
+    address old = exchange;
     exchange = _exchange;
+    emit ExchangeUpdated(old, _exchange);
   }
 
   // ─── Event lifecycle ─────────────────────────────────────────────────

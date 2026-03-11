@@ -922,6 +922,14 @@ contract PredictionMarketCLOBTest is Test {
     manager.adminSetClosesAt(marketId, block.timestamp + 2 days);
   }
 
+  function testSetNegRiskAdapterEmitsEvent() public {
+    address oldAdapter = manager.negRiskAdapter();
+    address newAdapter = address(0xADA);
+    vm.expectEmit(true, true, false, false, address(manager));
+    emit PredictionMarketV3ManagerCLOB.NegRiskAdapterUpdated(oldAdapter, newAdapter);
+    manager.setNegRiskAdapter(newAdapter);
+  }
+
   function testFillZeroReverts() public {
     uint256 amount = 100 ether;
     uint256 outcome0Price = (60 * ONE) / 100;
