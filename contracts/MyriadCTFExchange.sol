@@ -102,6 +102,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
     uint256 fillAmount,
     uint256 totalFilled
   );
+  event SurplusCollected(bytes32 indexed eventId, uint256 amount);
 
   /// @custom:oz-upgrades-unsafe-allow constructor
   constructor() {
@@ -258,16 +259,11 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
     uint256 totalFees;
     uint256 takerIdx = orders.length - 1;
 
-    uint256 notionalSoFar;
+    uint256 totalNotional;
     for (uint256 i = 0; i < orders.length; i++) {
-      uint256 notional;
-      if (i == orders.length - 1) {
-        notional = notionalSoFar >= fillAmount ? 0 : fillAmount - notionalSoFar;
-      } else {
-        notional = (fillAmount * orders[i].price) / ONE;
-        notionalSoFar += notional;
-        require(notional > 0, "notional 0");
-      }
+      uint256 notional = (fillAmount * orders[i].price) / ONE;
+      require(notional > 0, "notional 0");
+      totalNotional += notional;
 
       uint256 fee;
       if (i == takerIdx) {
@@ -279,7 +275,6 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
       }
       totalFees += fee;
 
-      // Each buyer pays notional + fee
       collateral.safeTransferFrom(orders[i].trader, address(this), notional + fee);
     }
 
@@ -298,10 +293,15 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
       emit CrossMarketOrderFilled(orderHash, eventId, orders[i].marketId, fillAmount, filledAmounts[orderHash]);
     }
 
-    // Accrue fees
-    if (totalFees > 0) {
-      collateral.safeTransfer(feeModule, totalFees);
-      IFeeModule(feeModule).accrueFees(address(collateral), totalFees);
+    // Send surplus (priceSum > ONE overage) + fees to feeModule
+    uint256 surplus = totalNotional - fillAmount;
+    uint256 toFeeModule = totalFees + surplus;
+    if (toFeeModule > 0) {
+      collateral.safeTransfer(feeModule, toFeeModule);
+      IFeeModule(feeModule).accrueFees(address(collateral), toFeeModule);
+    }
+    if (surplus > 0) {
+      emit SurplusCollected(eventId, surplus);
     }
   }
 
