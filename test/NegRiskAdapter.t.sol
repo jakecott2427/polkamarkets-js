@@ -708,6 +708,68 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     assertEq(wcol.balanceOf(address(exchange)), 0, "exchange has no stuck funds");
   }
 
+  function testCrossMarketRoundingShortfallHandled() public {
+    (, uint256[] memory marketIds) = _createThreeOutcomeEvent();
+    // fillAmount that causes rounding: (1e18+1) * 0.45e18 / 1e18 rounds down
+    uint256 fillAmount = 1 ether + 1;
+
+    for (uint256 i = 0; i < 3; i++) {
+      _setUniformFees(marketIds[i], 0, 0);
+    }
+
+    uint256 fundAmount = 10 ether;
+    address[3] memory users = [alice, bob, charlie];
+    uint256[3] memory pks = [alicePk, bobPk, charliePk];
+    for (uint256 i = 0; i < 3; i++) {
+      collateral.mint(users[i], fundAmount);
+      vm.startPrank(users[i]);
+      collateral.approve(address(wcol), fundAmount);
+      wcol.wrap(fundAmount);
+      IERC20(address(wcol)).approve(address(exchange), type(uint256).max);
+      conditionalTokens.setApprovalForAll(address(exchange), true);
+      vm.stopPrank();
+    }
+
+    // priceSum = 0.45 + 0.35 + 0.20 = 1.00 exactly
+    // With fillAmount = 1e18+1, naive notionals:
+    //   floor((1e18+1) * 0.45e18 / 1e18) = 450000000000000000
+    //   floor((1e18+1) * 0.35e18 / 1e18) = 350000000000000000
+    //   floor((1e18+1) * 0.20e18 / 1e18) = 200000000000000000
+    //   sum = 1e18, short by 1 wei — taker absorbs it
+    uint256 price0 = (45 * ONE) / 100;
+    uint256 price1 = (35 * ONE) / 100;
+    uint256 price2 = (20 * ONE) / 100;
+
+    MyriadCTFExchange.Order[] memory orders = new MyriadCTFExchange.Order[](3);
+    orders[0] = _buildOrder(alice, marketIds[0], 0, MyriadCTFExchange.Side.Buy, fillAmount, price0, 600);
+    orders[1] = _buildOrder(bob, marketIds[1], 0, MyriadCTFExchange.Side.Buy, fillAmount, price1, 601);
+    orders[2] = _buildOrder(charlie, marketIds[2], 0, MyriadCTFExchange.Side.Buy, fillAmount, price2, 602);
+
+    bytes[] memory sigs = new bytes[](3);
+    for (uint256 i = 0; i < 3; i++) {
+      sigs[i] = _signOrder(orders[i], pks[i]);
+    }
+
+    uint256 charlieBefore = wcol.balanceOf(charlie);
+
+    // Should not revert despite rounding shortfall
+    exchange.matchCrossMarketOrders(orders, sigs, fillAmount);
+
+    // All buyers received their tokens
+    for (uint256 i = 0; i < 3; i++) {
+      assertEq(conditionalTokens.balanceOf(users[i], conditionalTokens.getTokenId(marketIds[i], 0)), fillAmount);
+    }
+
+    // Charlie (taker) paid 1 wei more than naive notional to cover rounding
+    uint256 naiveNotional = (fillAmount * price2) / ONE;
+    uint256 charlieActualPaid = charlieBefore - wcol.balanceOf(charlie);
+    assertGt(charlieActualPaid, naiveNotional, "taker absorbed rounding dust");
+    assertLe(charlieActualPaid - naiveNotional, 2, "dust is at most N-1 wei");
+
+    // No stuck funds
+    assertEq(wcol.balanceOf(address(exchange)), 0, "exchange has no stuck funds");
+  }
+
   // =========================================================================
   // Void event
   // =========================================================================

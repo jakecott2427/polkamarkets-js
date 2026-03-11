@@ -262,6 +262,9 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
     uint256 totalNotional;
     for (uint256 i = 0; i < orders.length; i++) {
       uint256 notional = (fillAmount * orders[i].price) / ONE;
+      if (i == takerIdx && totalNotional + notional < fillAmount) {
+        notional = fillAmount - totalNotional;
+      }
       require(notional > 0, "notional 0");
       totalNotional += notional;
 
