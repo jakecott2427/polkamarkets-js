@@ -45,6 +45,10 @@ contract AdminRegistry is AccessControl {
     address oldAdmin = admin;
     _grantRole(DEFAULT_ADMIN_ROLE, pendingAdmin);
     _revokeRole(DEFAULT_ADMIN_ROLE, oldAdmin);
+    _revokeRole(MARKET_ADMIN_ROLE, oldAdmin);
+    _revokeRole(OPERATOR_ROLE, oldAdmin);
+    _revokeRole(FEE_ADMIN_ROLE, oldAdmin);
+    _revokeRole(RESOLUTION_ADMIN_ROLE, oldAdmin);
     admin = pendingAdmin;
     pendingAdmin = address(0);
     emit AdminAccepted(admin, oldAdmin);
