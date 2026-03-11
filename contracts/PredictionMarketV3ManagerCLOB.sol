@@ -52,8 +52,8 @@ contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardUpgradea
   IERC20 public collateralToken;
 
   uint256 public marketIndex;
-  mapping(uint256 => Market) public markets;
-  mapping(uint256 => uint256[2]) public voidedPayouts; // [outcome0Payout, outcome1Payout] in 1e18
+  mapping(uint256 marketId => Market) public markets;
+  mapping(uint256 marketId => uint256[2] payouts) public voidedPayouts; // [outcome0Payout, outcome1Payout] in 1e18
 
   /// @notice The NegRiskAdapter address, allowed to create neg risk markets.
   address public negRiskAdapter;

@@ -39,15 +39,15 @@ contract NegRiskAdapter is ReentrancyGuard, ERC1155Holder {
   address public treasury;
   address public exchange;
 
-  mapping(bytes32 => Event) internal _events;
+  mapping(bytes32 eventId => Event) internal _events;
 
   /// @dev Whether redeemNOPositions has already been called for an event.
-  mapping(bytes32 => bool) public noPositionsRedeemed;
+  mapping(bytes32 eventId => bool) public noPositionsRedeemed;
 
   /// @dev Total wcol minted (unbacked) by the adapter during convert/mintAll
   ///      operations for each event. Tracked so we know exactly how much
   ///      to burn during resolution cleanup.
-  mapping(bytes32 => uint256) public mintedWcolPerEvent;
+  mapping(bytes32 eventId => uint256 wcolMinted) public mintedWcolPerEvent;
 
   uint256 private _eventNonce;
 
