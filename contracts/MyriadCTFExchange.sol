@@ -396,7 +396,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
   function _validateOrder(Order calldata order, bytes calldata signature) internal view {
     require(order.trader != address(0), "trader 0");
     require(order.amount > 0, "amount 0");
-    require(order.expiration == 0 || order.expiration >= block.timestamp, "expired");
+    require(order.expiration == 0 || order.expiration > block.timestamp, "expired");
     require(order.outcomeId < 2, "bad outcome");
 
     bytes32 orderHash = hashOrder(order);

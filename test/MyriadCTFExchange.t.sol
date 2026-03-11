@@ -418,6 +418,65 @@ contract MyriadCTFExchangeTest is Test {
         exchange.matchOrdersWithFees(m, makerSig, t, takerSig, 100 ether);
     }
 
+    function testOrderExpiredAtExactTimestampReverts() public {
+        collateral.mint(maker, 1000 ether);
+        collateral.mint(taker, 1000 ether);
+        _approveAll(maker);
+        _approveAll(taker);
+
+        uint256 expiry = block.timestamp + 1 hours;
+
+        MyriadCTFExchange.Order memory m = MyriadCTFExchange.Order({
+            trader:        maker,
+            marketId:      marketId,
+            outcomeId:     0,
+            side:          MyriadCTFExchange.Side.Buy,
+            amount:        100 ether,
+            price:         (60 * ONE) / 100,
+            minFillAmount: 0,
+            nonce:         450,
+            expiration:    expiry
+        });
+        MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, 100 ether, (40 * ONE) / 100, 451);
+
+        bytes memory makerSig = _signOrder(m, makerPk);
+        bytes memory takerSig = _signOrder(t, takerPk);
+
+        // Warp to exactly the expiration timestamp — order should be expired
+        vm.warp(expiry);
+        vm.expectRevert("expired");
+        exchange.matchOrdersWithFees(m, makerSig, t, takerSig, 100 ether);
+    }
+
+    function testOrderValidBeforeExpiration() public {
+        collateral.mint(maker, 1000 ether);
+        collateral.mint(taker, 1000 ether);
+        _approveAll(maker);
+        _approveAll(taker);
+
+        uint256 expiry = block.timestamp + 1 hours;
+
+        MyriadCTFExchange.Order memory m = MyriadCTFExchange.Order({
+            trader:        maker,
+            marketId:      marketId,
+            outcomeId:     0,
+            side:          MyriadCTFExchange.Side.Buy,
+            amount:        100 ether,
+            price:         (60 * ONE) / 100,
+            minFillAmount: 0,
+            nonce:         452,
+            expiration:    expiry
+        });
+        MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, 100 ether, (40 * ONE) / 100, 453);
+
+        bytes memory makerSig = _signOrder(m, makerPk);
+        bytes memory takerSig = _signOrder(t, takerPk);
+
+        // One second before expiry — order should succeed
+        vm.warp(expiry - 1);
+        exchange.matchOrdersWithFees(m, makerSig, t, takerSig, 100 ether);
+    }
+
     // =========================================================================
     // Order matching validation
     // =========================================================================
