@@ -506,6 +506,7 @@ contract ConditionalTokensTest is Test {
         vm.stopPrank();
 
         // Voided market — both tokens carry partial value; burning is not allowed
+        vm.warp(block.timestamp + 2 days);
         manager.adminVoidMarket(marketId, ONE / 2, ONE / 2);
 
         vm.prank(alice);

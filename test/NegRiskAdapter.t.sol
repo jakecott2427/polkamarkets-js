@@ -500,6 +500,7 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     yesPayouts[1] = ONE / 2;
     yesPayouts[2] = ONE / 2;
 
+    vm.warp(block.timestamp + 2 days);
     adapter.voidEvent(eventId, yesPayouts);
 
     (, bool resolved, int256 winningIndex,,) = adapter.getEvent(eventId);
@@ -539,6 +540,7 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     yesPayouts[1] = (30 * ONE) / 100;
     yesPayouts[2] = (10 * ONE) / 100;
 
+    vm.warp(block.timestamp + 2 days);
     adapter.voidEvent(eventId, yesPayouts);
 
     // Alice holds YES for all 3 markets, redeem each
@@ -573,6 +575,7 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     yesPayouts[1] = (50 * ONE) / 100;
     yesPayouts[2] = (50 * ONE) / 100;
 
+    vm.warp(block.timestamp + 2 days);
     adapter.voidEvent(eventId, yesPayouts);
 
     // Adapter redeems its NO positions from voided markets
