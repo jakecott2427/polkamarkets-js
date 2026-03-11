@@ -65,7 +65,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
     );
   uint256 private constant ONE = 1e18;
   uint256 private constant BPS = 10000;
-  uint256 private constant CALLBACK_GAS_LIMIT = 100_000;
+  uint256 private constant DEFAULT_CALLBACK_GAS_LIMIT = 100_000;
 
   AdminRegistry public registry;
   IMyriadMarketManager public manager;
@@ -81,6 +81,10 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
   /// @notice Cumulative fill amount per order hash (supports partial fills).
   mapping(bytes32 => uint256) public filledAmounts;
 
+  /// @notice Gas cap for ERC-1155 safeTransferFrom callbacks (EIP-7702 griefing protection).
+  uint256 public callbackGasLimit;
+
+  event CallbackGasLimitUpdated(uint256 oldLimit, uint256 newLimit);
   event OrderCancelled(bytes32 indexed orderHash, address indexed trader);
   event OrdersMatched(
     bytes32 makerHash,
@@ -128,6 +132,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
     conditionalTokens = _conditionalTokens;
     feeModule = _feeModule;
     registry = _registry;
+    callbackGasLimit = DEFAULT_CALLBACK_GAS_LIMIT;
   }
 
   function _authorizeUpgrade(address) internal view override {
@@ -149,6 +154,13 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
   function setNegRiskAdapter(address _adapter) external {
     require(registry.hasRole(registry.DEFAULT_ADMIN_ROLE(), msg.sender), "not admin");
     negRiskAdapter = _adapter;
+  }
+
+  function setCallbackGasLimit(uint256 _limit) external {
+    require(registry.hasRole(registry.DEFAULT_ADMIN_ROLE(), msg.sender), "not admin");
+    require(_limit >= 50_000, "limit too low");
+    emit CallbackGasLimitUpdated(callbackGasLimit, _limit);
+    callbackGasLimit = _limit;
   }
 
   // ─── Order management ────────────────────────────────────────────────
@@ -421,7 +433,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
     uint256 id,
     uint256 amount
   ) internal {
-    (bool success, bytes memory returndata) = address(conditionalTokens).call{gas: CALLBACK_GAS_LIMIT}(
+    (bool success, bytes memory returndata) = address(conditionalTokens).call{gas: callbackGasLimit}(
       abi.encodeCall(conditionalTokens.safeTransferFrom, (from, to, id, amount, ""))
     );
     if (!success) {

@@ -1376,6 +1376,66 @@ contract PredictionMarketCLOBTest is Test {
   }
 
   // =========================================================================
+  // setCallbackGasLimit
+  // =========================================================================
+
+  function testSetCallbackGasLimit() public {
+    assertEq(exchange.callbackGasLimit(), 100_000);
+
+    exchange.setCallbackGasLimit(200_000);
+    assertEq(exchange.callbackGasLimit(), 200_000);
+  }
+
+  function testSetCallbackGasLimitEmitsEvent() public {
+    vm.expectEmit(false, false, false, true);
+    emit MyriadCTFExchange.CallbackGasLimitUpdated(100_000, 250_000);
+    exchange.setCallbackGasLimit(250_000);
+  }
+
+  function testSetCallbackGasLimitNotAdminReverts() public {
+    vm.prank(taker);
+    vm.expectRevert("not admin");
+    exchange.setCallbackGasLimit(200_000);
+  }
+
+  function testSetCallbackGasLimitTooLowReverts() public {
+    vm.expectRevert("limit too low");
+    exchange.setCallbackGasLimit(49_999);
+  }
+
+  function testSetCallbackGasLimitMinimumAllowed() public {
+    exchange.setCallbackGasLimit(50_000);
+    assertEq(exchange.callbackGasLimit(), 50_000);
+  }
+
+  function testMatchStillWorksAfterGasLimitChange() public {
+    exchange.setCallbackGasLimit(200_000);
+
+    uint256 amount = 100 ether;
+    uint256 price = (60 * ONE) / 100;
+
+    collateral.mint(maker, 1000 ether);
+    collateral.mint(taker, 1000 ether);
+
+    vm.prank(maker);
+    collateral.approve(address(conditionalTokens), type(uint256).max);
+    vm.prank(maker);
+    conditionalTokens.splitPosition(marketId, amount);
+    vm.prank(maker);
+    conditionalTokens.setApprovalForAll(address(exchange), true);
+    vm.prank(taker);
+    collateral.approve(address(exchange), type(uint256).max);
+
+    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Sell, amount, price, 1100);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, price, 1101);
+
+    exchange.matchOrdersWithFees(m, _signOrder(m, makerPk), t, _signOrder(t, takerPk), amount);
+
+    uint256 tokenId = conditionalTokens.getTokenId(marketId, 0);
+    assertEq(conditionalTokens.balanceOf(taker, tokenId), amount);
+  }
+
+  // =========================================================================
   // Helpers
   // =========================================================================
 
