@@ -49,4 +49,22 @@ contract AdminRegistry is AccessControl {
     pendingAdmin = address(0);
     emit AdminAccepted(admin, oldAdmin);
   }
+
+  // Block inherited AccessControl functions for DEFAULT_ADMIN_ROLE so that
+  // all admin transfers are forced through the two-step proposeAdmin/acceptAdmin path.
+
+  function grantRole(bytes32 role, address account) public override {
+    require(role != DEFAULT_ADMIN_ROLE, "use proposeAdmin/acceptAdmin");
+    super.grantRole(role, account);
+  }
+
+  function revokeRole(bytes32 role, address account) public override {
+    require(role != DEFAULT_ADMIN_ROLE, "use proposeAdmin/acceptAdmin");
+    super.revokeRole(role, account);
+  }
+
+  function renounceRole(bytes32 role, address callerConfirmation) public override {
+    require(role != DEFAULT_ADMIN_ROLE, "use proposeAdmin/acceptAdmin");
+    super.renounceRole(role, callerConfirmation);
+  }
 }

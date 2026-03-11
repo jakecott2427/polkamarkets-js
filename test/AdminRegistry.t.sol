@@ -157,6 +157,28 @@ contract AdminRegistryTest is Test {
         registry.proposeAdmin(admin);
     }
 
+    // =========================================================================
+    // grantRole / revokeRole / renounceRole bypass prevention
+    // =========================================================================
+
+    function testGrantDefaultAdminRoleDirectlyReverts() public {
+        bytes32 role = registry.DEFAULT_ADMIN_ROLE();
+        vm.expectRevert("use proposeAdmin/acceptAdmin");
+        registry.grantRole(role, alice);
+    }
+
+    function testRevokeDefaultAdminRoleDirectlyReverts() public {
+        bytes32 role = registry.DEFAULT_ADMIN_ROLE();
+        vm.expectRevert("use proposeAdmin/acceptAdmin");
+        registry.revokeRole(role, admin);
+    }
+
+    function testRenounceDefaultAdminRoleReverts() public {
+        bytes32 role = registry.DEFAULT_ADMIN_ROLE();
+        vm.expectRevert("use proposeAdmin/acceptAdmin");
+        registry.renounceRole(role, admin);
+    }
+
     function testProposeAdminCanRepropose() public {
         registry.proposeAdmin(alice);
         assertEq(registry.pendingAdmin(), alice);
