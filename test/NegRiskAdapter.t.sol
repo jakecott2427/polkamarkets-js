@@ -135,6 +135,23 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     adapter.createEvent("Duplicate event", params);
   }
 
+  function testCreateEventClosesAtMismatchReverts() public {
+    PredictionMarketV3ManagerCLOB.CreateMarketParams[] memory params =
+      new PredictionMarketV3ManagerCLOB.CreateMarketParams[](3);
+    params[0] = _mkParam("Trump");
+    params[1] = _mkParam("Harris");
+    params[2] = PredictionMarketV3ManagerCLOB.CreateMarketParams({
+      closesAt: block.timestamp + 2 days,
+      question: "Biden",
+      image: "",
+      feeModule: address(feeModule),
+      oracle: address(0),
+      oracleData: ""
+    });
+    vm.expectRevert("closesAt mismatch");
+    adapter.createEvent("Who will win?", params);
+  }
+
   // =========================================================================
   // Split / Merge
   // =========================================================================

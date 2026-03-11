@@ -117,6 +117,11 @@ contract NegRiskAdapter is ReentrancyGuard, ERC1155Holder {
     require(marketParams.length >= 2, "need >= 2 outcomes");
     require(marketParams.length <= 256, "max 256 outcomes");
 
+    uint256 closesAt = marketParams[0].closesAt;
+    for (uint256 i = 1; i < marketParams.length; i++) {
+      require(marketParams[i].closesAt == closesAt, "closesAt mismatch");
+    }
+
     eventId = keccak256(abi.encodePacked(address(this), _eventNonce));
     _eventNonce++;
 
