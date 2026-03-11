@@ -226,21 +226,24 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
     }
 
     uint256 priceSum;
+    bytes32[] memory orderHashes = new bytes32[](orders.length);
+    uint256[] memory currentFilled = new uint256[](orders.length);
 
     for (uint256 i = 0; i < orders.length; i++) {
       Order calldata order = orders[i];
       require(order.side == Side.Buy, "not buy");
       require(order.outcomeId == Outcomes.YES, "not YES");
       require(order.price > 0 && order.price <= ONE, "bad price");
-      // Verify every order's market maps to the same eventId
       require(manager.getEventId(order.marketId) == eventId, "event mismatch");
       require(manager.isNegRisk(order.marketId), "not neg risk");
 
       _requireMarketOpen(order.marketId);
       _validateOrder(order, signatures[i]);
 
-      bytes32 orderHash = hashOrder(order);
-      require(filledAmounts[orderHash] + fillAmount <= order.amount, "overfill");
+      bytes32 h = hashOrder(order);
+      orderHashes[i] = h;
+      currentFilled[i] = filledAmounts[h];
+      require(currentFilled[i] + fillAmount <= order.amount, "overfill");
       require(order.minFillAmount == 0 || fillAmount >= order.minFillAmount, "below min fill");
 
       for (uint256 j = 0; j < i; j++) {
@@ -292,10 +295,10 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
       uint256 tokenId = conditionalTokens.getTokenId(orders[i].marketId, Outcomes.YES);
       conditionalTokens.safeTransferFrom(address(this), orders[i].trader, tokenId, fillAmount, "");
 
-      bytes32 orderHash = hashOrder(orders[i]);
-      filledAmounts[orderHash] += fillAmount;
+      uint256 newFill = currentFilled[i] + fillAmount;
+      filledAmounts[orderHashes[i]] = newFill;
 
-      emit CrossMarketOrderFilled(orderHash, eventId, orders[i].marketId, fillAmount, filledAmounts[orderHash]);
+      emit CrossMarketOrderFilled(orderHashes[i], eventId, orders[i].marketId, fillAmount, newFill);
     }
 
     // Accrue fees
@@ -357,14 +360,18 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
     bytes32 makerHash = hashOrder(maker);
     bytes32 takerHash = hashOrder(taker);
 
-    require(filledAmounts[makerHash] + fillAmount <= maker.amount, "maker overfill");
-    require(filledAmounts[takerHash] + fillAmount <= taker.amount, "taker overfill");
+    uint256 makerFilled = filledAmounts[makerHash];
+    uint256 takerFilled = filledAmounts[takerHash];
+    require(makerFilled + fillAmount <= maker.amount, "maker overfill");
+    require(takerFilled + fillAmount <= taker.amount, "taker overfill");
 
     require(maker.minFillAmount == 0 || fillAmount >= maker.minFillAmount, "below maker min fill");
     require(taker.minFillAmount == 0 || fillAmount >= taker.minFillAmount, "below taker min fill");
 
-    filledAmounts[makerHash] += fillAmount;
-    filledAmounts[takerHash] += fillAmount;
+    makerFilled += fillAmount;
+    takerFilled += fillAmount;
+    filledAmounts[makerHash] = makerFilled;
+    filledAmounts[takerHash] = takerFilled;
 
     uint8 matchType;
     if (maker.side != taker.side) {
@@ -386,8 +393,8 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
       maker.marketId,
       matchType,
       fillAmount,
-      filledAmounts[makerHash],
-      filledAmounts[takerHash],
+      makerFilled,
+      takerFilled,
       makerFee,
       takerFee
     );
