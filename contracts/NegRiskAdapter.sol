@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC1155/utils/ERC1155Holder.sol";
 
@@ -16,7 +16,7 @@ import "./Outcomes.sol";
 ///         Provides split/merge/convert operations via WrappedCollateral
 ///         and handles batch resolution (including the "Other wins" case
 ///         where no named outcome is the winner).
-contract NegRiskAdapter is ReentrancyGuard, ERC1155Holder {
+contract NegRiskAdapter is ReentrancyGuardTransient, ERC1155Holder {
   using SafeERC20 for IERC20;
 
   // ─── Types ───────────────────────────────────────────────────────────
