@@ -68,6 +68,7 @@ contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardUpgradea
   event MarketResolved(address indexed user, uint256 indexed marketId, int256 outcomeId, uint256 timestamp);
   event MarketPaused(address indexed user, uint256 indexed marketId, bool paused, uint256 timestamp);
   event MarketOracleUpdated(uint256 indexed marketId, address oldOracle, address newOracle);
+  event MarketClosesAtUpdated(uint256 indexed marketId, uint256 oldClosesAt, uint256 newClosesAt);
 
   /// @custom:oz-upgrades-unsafe-allow constructor
   constructor() {
@@ -217,6 +218,7 @@ contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardUpgradea
     require(market.id == marketId, "!m");
     require(market.state != MarketState.resolved, "resolved");
     require(!market.negRisk, "use resolveEvent for neg risk");
+    require(block.timestamp >= market.closesAt, "market not closed");
 
     market.resolvedOutcome = Outcomes.VOIDED;
     market.state = MarketState.resolved;
@@ -247,6 +249,20 @@ contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardUpgradea
     }
 
     emit MarketOracleUpdated(marketId, oldOracle, newOracle);
+  }
+
+  function adminSetClosesAt(uint256 marketId, uint256 newClosesAt) external nonReentrant {
+    require(registry.hasRole(registry.MARKET_ADMIN_ROLE(), msg.sender), "not market admin");
+    require(newClosesAt >= block.timestamp, "close in past");
+
+    Market storage market = markets[marketId];
+    require(market.id == marketId, "!m");
+    require(market.state != MarketState.resolved, "resolved");
+
+    uint256 oldClosesAt = market.closesAt;
+    market.closesAt = newClosesAt;
+
+    emit MarketClosesAtUpdated(marketId, oldClosesAt, newClosesAt);
   }
 
   function pauseMarket(uint256 marketId, bool paused) external nonReentrant {
@@ -291,6 +307,13 @@ contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardUpgradea
     require(market.id == marketId, "!m");
 
     return (market.outcome0TokenId, market.outcome1TokenId);
+  }
+
+  function getMarketClosesAt(uint256 marketId) external view returns (uint256) {
+    Market storage market = markets[marketId];
+    require(market.id == marketId, "!m");
+
+    return market.closesAt;
   }
 
   function getMarketOracle(uint256 marketId) external view returns (address) {
