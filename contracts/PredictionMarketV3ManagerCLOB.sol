@@ -173,7 +173,7 @@ contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardUpgradea
 
     (int256 outcome, bool resolved) = IMarketOracle(market.oracle).getResult(marketId);
     require(resolved, "oracle: not resolved");
-    require(outcome == 0 || outcome == 1 || outcome == -1, "invalid outcome");
+    require(outcome == 0 || outcome == 1, "oracle: invalid outcome");
 
     market.resolvedOutcome = outcome;
     market.state = MarketState.resolved;
