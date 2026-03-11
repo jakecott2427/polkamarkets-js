@@ -152,6 +152,11 @@ contract AdminRegistryTest is Test {
         registry.proposeAdmin(bob);
     }
 
+    function testProposeAdminRejectsSelfProposal() public {
+        vm.expectRevert("cannot self-propose");
+        registry.proposeAdmin(admin);
+    }
+
     // =========================================================================
     // grantRole / revokeRole / renounceRole bypass prevention
     // =========================================================================
