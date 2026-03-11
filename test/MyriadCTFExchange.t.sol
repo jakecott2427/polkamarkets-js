@@ -350,7 +350,7 @@ contract MyriadCTFExchangeTest is Test {
         bytes memory badSig  = _signOrder(m, thirdPk);
         bytes memory takerSig = _signOrder(t, takerPk);
 
-        vm.expectRevert("signer mismatch");
+        vm.expectRevert("invalid signature");
         exchange.matchOrdersWithFees(m, badSig, t, takerSig, amount);
     }
 

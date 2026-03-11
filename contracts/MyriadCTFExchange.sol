@@ -7,7 +7,7 @@ import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts/token/ERC1155/utils/ERC1155Holder.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
 import "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol";
 
 import "./AdminRegistry.sol";
@@ -401,9 +401,10 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
     bytes32 orderHash = hashOrder(order);
     require(!orderInvalidated[orderHash], "invalidated");
 
-    (address signer, ECDSA.RecoverError recoverError, ) = ECDSA.tryRecover(orderHash, signature);
-    require(recoverError == ECDSA.RecoverError.NoError, "invalid signature");
-    require(signer == order.trader, "signer mismatch");
+    require(
+      SignatureChecker.isValidSignatureNow(order.trader, orderHash, signature),
+      "invalid signature"
+    );
   }
 
   function _validateFeeConfig(FeeConfig memory feeConfig) internal pure {
