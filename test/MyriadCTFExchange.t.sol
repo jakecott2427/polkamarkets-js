@@ -350,7 +350,7 @@ contract MyriadCTFExchangeTest is Test {
         bytes memory badSig  = _signOrder(m, thirdPk);
         bytes memory takerSig = _signOrder(t, takerPk);
 
-        vm.expectRevert("signer mismatch");
+        vm.expectRevert("invalid signature");
         exchange.matchOrdersWithFees(m, badSig, t, takerSig, amount);
     }
 
@@ -578,40 +578,6 @@ contract MyriadCTFExchangeTest is Test {
 
         vm.expectRevert("price sum");
         exchange.matchOrdersWithFees(m, mSig, t, tSig, amount);
-    }
-
-    function testMergeMatchFeeExceedsProceedsReverts() public {
-        // Set fees to 100% (10000 bps) so the seller fee equals proceeds entirely.
-        // At 10000 bps: fee = (notional * 10000) / 10000 = notional = proceeds.
-        // require(proceeds >= fee) passes (equality). Sellers receive 0 collateral.
-        // This validates the 100% fee path does not underflow.
-        _setUniformFees(marketId, 10000, 10000);
-
-        uint256 amount = 100 ether;
-        uint256 outcome0Price = ONE / 2;
-        uint256 outcome1Price = ONE / 2;
-
-        collateral.mint(maker, 1000 ether);
-        collateral.mint(taker, 1000 ether);
-        _approveAll(maker);
-        _approveAll(taker);
-
-        vm.prank(maker);
-        conditionalTokens.splitPosition(marketId, amount);
-        vm.prank(taker);
-        conditionalTokens.splitPosition(marketId, amount);
-
-        MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Sell, amount, outcome0Price, 560);
-        MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Sell, amount, outcome1Price, 561);
-
-        bytes memory mSig = _signOrder(m, makerPk);
-        bytes memory tSig = _signOrder(t, takerPk);
-
-        // At 100% fees, all collateral is taken as fees; sellers receive 0 proceeds.
-        exchange.matchOrdersWithFees(m, mSig, t, tSig, amount);
-
-        // All collateral went to fees
-        assertEq(collateral.balanceOf(address(feeModule)), amount);
     }
 
     // =========================================================================

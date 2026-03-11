@@ -1109,7 +1109,16 @@ contract PredictionMarketCLOBTest is Test {
 
     oracle.setResult(marketId, 5, true);
 
-    vm.expectRevert("invalid outcome");
+    vm.expectRevert("oracle: invalid outcome");
+    manager.resolveMarket(marketId);
+  }
+
+  function testOracleVoidOutcomeReverts() public {
+    vm.warp(block.timestamp + 2 days);
+
+    oracle.setResult(marketId, -1, true);
+
+    vm.expectRevert("oracle: invalid outcome");
     manager.resolveMarket(marketId);
   }
 
