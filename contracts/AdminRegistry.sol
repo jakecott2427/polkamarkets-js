@@ -33,6 +33,7 @@ contract AdminRegistry is AccessControl {
   function proposeAdmin(address newAdmin) external {
     require(hasRole(DEFAULT_ADMIN_ROLE, msg.sender), "not admin");
     require(newAdmin != address(0), "zero address");
+    require(newAdmin != admin, "cannot self-propose");
     pendingAdmin = newAdmin;
     emit AdminProposed(newAdmin);
   }
