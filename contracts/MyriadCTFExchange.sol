@@ -595,7 +595,6 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
   }
 
   function _requireMarketOpen(uint256 marketId) internal view {
-    require(manager.getMarketState(marketId) == IMyriadMarketManager.MarketState.open, "market closed");
-    require(!manager.isMarketPaused(marketId), "market paused");
+    require(manager.isMarketTradeable(marketId), "market not tradeable");
   }
 }

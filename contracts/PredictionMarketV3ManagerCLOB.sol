@@ -359,6 +359,13 @@ contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardUpgradea
     return market.paused;
   }
 
+  function isMarketTradeable(uint256 marketId) external view override returns (bool) {
+    Market storage market = markets[marketId];
+    require(market.id == marketId, "!m");
+
+    return market.state == MarketState.open && block.timestamp < market.closesAt && !market.paused;
+  }
+
   function getVoidedPayouts(uint256 marketId) external view override returns (uint256 outcome0Payout, uint256 outcome1Payout) {
     Market storage market = markets[marketId];
     require(market.id == marketId, "!m");
