@@ -66,6 +66,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
     );
   uint256 private constant ONE = 1e18;
   uint256 private constant BPS = 10000;
+  uint256 private constant DEFAULT_CALLBACK_GAS_LIMIT = 100_000;
 
   AdminRegistry public registry;
   IMyriadMarketManager public manager;
@@ -81,6 +82,10 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
   /// @notice Cumulative fill amount per order hash (supports partial fills).
   mapping(bytes32 => uint256) public filledAmounts;
 
+  /// @notice Gas cap for ERC-1155 safeTransferFrom callbacks (EIP-7702 griefing protection).
+  uint256 public callbackGasLimit;
+
+  event CallbackGasLimitUpdated(uint256 oldLimit, uint256 newLimit);
   event OrderCancelled(bytes32 indexed orderHash, address indexed trader);
   event OrdersMatched(
     bytes32 makerHash,
@@ -128,6 +133,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
     conditionalTokens = _conditionalTokens;
     feeModule = _feeModule;
     registry = _registry;
+    callbackGasLimit = DEFAULT_CALLBACK_GAS_LIMIT;
   }
 
   function _authorizeUpgrade(address) internal view override {
@@ -149,6 +155,13 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
   function setNegRiskAdapter(address _adapter) external {
     require(registry.hasRole(registry.DEFAULT_ADMIN_ROLE(), msg.sender), "not admin");
     negRiskAdapter = _adapter;
+  }
+
+  function setCallbackGasLimit(uint256 _limit) external {
+    require(registry.hasRole(registry.DEFAULT_ADMIN_ROLE(), msg.sender), "not admin");
+    require(_limit >= 50_000, "limit too low");
+    emit CallbackGasLimitUpdated(callbackGasLimit, _limit);
+    callbackGasLimit = _limit;
   }
 
   // ─── Order management ────────────────────────────────────────────────
@@ -290,7 +303,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
     // Distribute YES tokens (fillAmount per outcome) to each buyer
     for (uint256 i = 0; i < orders.length; i++) {
       uint256 tokenId = conditionalTokens.getTokenId(orders[i].marketId, Outcomes.YES);
-      conditionalTokens.safeTransferFrom(address(this), orders[i].trader, tokenId, fillAmount, "");
+      _safeTransferWithGasCap(address(this), orders[i].trader, tokenId, fillAmount);
 
       bytes32 orderHash = hashOrder(orders[i]);
       filledAmounts[orderHash] += fillAmount;
@@ -413,6 +426,26 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
     require(feeConfig.takerFeeBps <= BPS, "taker fee");
   }
 
+  /// @dev Gas-capped ERC-1155 transfer to an arbitrary trader.
+  ///      Caps total gas for the safeTransferFrom call so that the recipient's
+  ///      onERC1155Received callback cannot consume unbounded gas (EIP-7702 griefing).
+  function _safeTransferWithGasCap(
+    address from,
+    address to,
+    uint256 id,
+    uint256 amount
+  ) internal {
+    (bool success, bytes memory returndata) = address(conditionalTokens).call{gas: callbackGasLimit}(
+      abi.encodeCall(conditionalTokens.safeTransferFrom, (from, to, id, amount, ""))
+    );
+    if (!success) {
+      if (returndata.length > 0) {
+        assembly { revert(add(returndata, 32), mload(returndata)) }
+      }
+      revert("transfer failed");
+    }
+  }
+
   /// @dev Direct match: BUY vs SELL (same outcome).
   ///      Buyer pays notional + buyerFee, receives full fillAmount shares.
   ///      Seller provides fillAmount shares, receives notional - sellerFee.
@@ -454,12 +487,11 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
     collateral.safeTransferFrom(buyer, address(this), notional + buyerFee);
 
     // Full shares transfer
-    conditionalTokens.safeTransferFrom(
+    _safeTransferWithGasCap(
       seller,
       buyer,
       conditionalTokens.getTokenId(maker.marketId, maker.outcomeId),
-      fillAmount,
-      ""
+      fillAmount
     );
 
     // Seller receives notional - fee
@@ -505,13 +537,13 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
     conditionalTokens.splitPosition(maker.marketId, fillAmount);
 
     // Each buyer receives fillAmount shares of their outcome token
-    conditionalTokens.safeTransferFrom(
+    _safeTransferWithGasCap(
       address(this), outcome0Order.trader,
-      conditionalTokens.getTokenId(maker.marketId, Outcomes.YES), fillAmount, ""
+      conditionalTokens.getTokenId(maker.marketId, Outcomes.YES), fillAmount
     );
-    conditionalTokens.safeTransferFrom(
+    _safeTransferWithGasCap(
       address(this), outcome1Order.trader,
-      conditionalTokens.getTokenId(maker.marketId, Outcomes.NO), fillAmount, ""
+      conditionalTokens.getTokenId(maker.marketId, Outcomes.NO), fillAmount
     );
 
     // Fees to FeeModule
