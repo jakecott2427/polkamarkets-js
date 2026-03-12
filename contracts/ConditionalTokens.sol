@@ -32,6 +32,7 @@ contract ConditionalTokens is ERC1155, ReentrancyGuard {
   function splitPosition(uint256 marketId, uint256 amount) external nonReentrant {
     require(amount > 0, "amount 0");
     require(manager.getMarketState(marketId) == IMyriadMarketManager.MarketState.open, "market not open");
+    require(!manager.isMarketPaused(marketId), "market paused");
 
     IERC20 collateral = manager.getMarketCollateral(marketId);
     collateral.safeTransferFrom(msg.sender, address(this), amount);
