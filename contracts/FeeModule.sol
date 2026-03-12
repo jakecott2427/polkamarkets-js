@@ -32,16 +32,17 @@ contract FeeModule is Initializable, UUPSUpgradeable {
   uint256 private constant BPS = 10000;
   uint256 private constant ONE = 1e18;
   uint256 public constant MAX_TIERS = 100;
+  uint256 public constant MAX_FEE_BPS = 1000; // 10% max per side
 
   // ─── State ───────────────────────────────────────────────────────────
 
   AdminRegistry public registry;
 
   /// @dev Fee tiers per market, sorted ascending by maxPrice.
-  mapping(uint256 => FeeTier[]) internal _marketFees;
+  mapping(uint256 marketId => FeeTier[]) internal _marketFees;
 
   /// @notice Total accrued (unclaimed) fees per collateral token.
-  mapping(address => uint256) public accruedFees;
+  mapping(address token => uint256 amount) public accruedFees;
 
   /// @notice Only address allowed to push fee accruals (set to the exchange).
   address public exchange;
@@ -99,7 +100,7 @@ contract FeeModule is Initializable, UUPSUpgradeable {
 
     for (uint256 i = 0; i < tiers.length; i++) {
       require(tiers[i].maxPrice > 0 && tiers[i].maxPrice <= ONE, "invalid max price");
-      require(tiers[i].makerFeeBps <= BPS && tiers[i].takerFeeBps <= BPS, "fee too high");
+      require(tiers[i].makerFeeBps <= MAX_FEE_BPS && tiers[i].takerFeeBps <= MAX_FEE_BPS, "fee too high");
       if (i > 0) {
         require(tiers[i].maxPrice > tiers[i - 1].maxPrice, "tiers not sorted");
       }
@@ -151,7 +152,7 @@ contract FeeModule is Initializable, UUPSUpgradeable {
   function _lookupFees(uint256 marketId, uint256 price) internal view returns (uint16 makerBps, uint16 takerBps) {
     FeeTier[] storage tiers = _marketFees[marketId];
     for (uint256 i = 0; i < tiers.length; i++) {
-      if (price < tiers[i].maxPrice) {
+      if (price <= tiers[i].maxPrice) {
         return (uint16(tiers[i].makerFeeBps), uint16(tiers[i].takerFeeBps));
       }
     }

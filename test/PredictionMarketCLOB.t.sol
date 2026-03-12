@@ -675,7 +675,7 @@ contract PredictionMarketCLOBTest is Test {
     bytes memory makerSig = _signOrder(makerOrder, makerPk);
     bytes memory takerSig = _signOrder(takerOrder, takerPk);
 
-    vm.expectRevert("market closed");
+    vm.expectRevert("market not tradeable");
     exchange.matchOrdersWithFees(makerOrder, makerSig, takerOrder, takerSig, amount);
   }
 
@@ -704,7 +704,7 @@ contract PredictionMarketCLOBTest is Test {
     bytes memory makerSig = _signOrder(makerOrder, makerPk);
     bytes memory takerSig = _signOrder(takerOrder, takerPk);
 
-    vm.expectRevert("market closed");
+    vm.expectRevert("market not tradeable");
     exchange.matchOrdersWithFees(makerOrder, makerSig, takerOrder, takerSig, amount);
   }
 
@@ -720,6 +720,8 @@ contract PredictionMarketCLOBTest is Test {
   }
 
   function testAdminVoidMarket() public {
+    vm.warp(block.timestamp + 2 days);
+
     uint256 outcome0Payout = (60 * ONE) / 100;
     uint256 outcome1Payout = ONE - outcome0Payout;
 
@@ -735,6 +737,8 @@ contract PredictionMarketCLOBTest is Test {
   }
 
   function testAdminVoidMarketBadPayoutsReverts() public {
+    vm.warp(block.timestamp + 2 days);
+
     vm.expectRevert("payouts must sum to 1e18");
     manager.adminVoidMarket(marketId, (50 * ONE) / 100, (60 * ONE) / 100);
 
@@ -763,7 +767,8 @@ contract PredictionMarketCLOBTest is Test {
     MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 211);
     exchange.matchOrdersWithFees(m, _signOrder(m, makerPk), t, _signOrder(t, takerPk), amount);
 
-    // Full shares minted with new fee model
+    vm.warp(block.timestamp + 2 days);
+
     manager.adminVoidMarket(marketId, (50 * ONE) / 100, (50 * ONE) / 100);
 
     uint256 makerBefore = collateral.balanceOf(maker);
@@ -799,7 +804,8 @@ contract PredictionMarketCLOBTest is Test {
     MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 221);
     exchange.matchOrdersWithFees(m, _signOrder(m, makerPk), t, _signOrder(t, takerPk), amount);
 
-    // Full shares minted with new fee model
+    vm.warp(block.timestamp + 2 days);
+
     uint256 outcome0Payout = (70 * ONE) / 100;
     uint256 outcome1Payout = ONE - outcome0Payout;
     manager.adminVoidMarket(marketId, outcome0Payout, outcome1Payout);
@@ -825,6 +831,8 @@ contract PredictionMarketCLOBTest is Test {
     conditionalTokens.splitPosition(marketId, amount);
     vm.stopPrank();
 
+    vm.warp(block.timestamp + 2 days);
+
     uint256 outcome0Payout = (60 * ONE) / 100;
     uint256 outcome1Payout = ONE - outcome0Payout;
     manager.adminVoidMarket(marketId, outcome0Payout, outcome1Payout);
@@ -838,6 +846,7 @@ contract PredictionMarketCLOBTest is Test {
   }
 
   function testRedeemVoidedNoBalanceReverts() public {
+    vm.warp(block.timestamp + 2 days);
     manager.adminVoidMarket(marketId, (50 * ONE) / 100, (50 * ONE) / 100);
 
     vm.prank(maker);
@@ -846,6 +855,7 @@ contract PredictionMarketCLOBTest is Test {
   }
 
   function testRedeemVoidedNotVoidedReverts() public {
+    vm.warp(block.timestamp + 2 days);
     manager.adminResolveMarket(marketId, 0);
 
     vm.prank(maker);
@@ -862,6 +872,8 @@ contract PredictionMarketCLOBTest is Test {
     conditionalTokens.splitPosition(marketId, amount);
     vm.stopPrank();
 
+    vm.warp(block.timestamp + 2 days);
+
     manager.adminVoidMarket(marketId, (50 * ONE) / 100, (50 * ONE) / 100);
 
     vm.prank(maker);
@@ -870,6 +882,52 @@ contract PredictionMarketCLOBTest is Test {
     vm.prank(maker);
     vm.expectRevert("no balance");
     conditionalTokens.redeemVoided(marketId);
+  }
+
+  function testAdminVoidBeforeCloseReverts() public {
+    vm.expectRevert("market not closed");
+    manager.adminVoidMarket(marketId, (50 * ONE) / 100, (50 * ONE) / 100);
+  }
+
+  function testSetClosesAt() public {
+    uint256 newClosesAt = block.timestamp + 3 days;
+    manager.adminSetClosesAt(marketId, newClosesAt);
+    assertEq(manager.getMarketClosesAt(marketId), newClosesAt);
+  }
+
+  function testSetClosesAtToNowAndVoid() public {
+    manager.adminSetClosesAt(marketId, block.timestamp);
+
+    manager.adminVoidMarket(marketId, (50 * ONE) / 100, (50 * ONE) / 100);
+    assertEq(uint8(manager.getMarketState(marketId)), uint8(IMyriadMarketManager.MarketState.resolved));
+  }
+
+  function testSetClosesAtPastReverts() public {
+    vm.warp(block.timestamp + 1 hours);
+    vm.expectRevert("close in past");
+    manager.adminSetClosesAt(marketId, block.timestamp - 1);
+  }
+
+  function testSetClosesAtResolvedReverts() public {
+    vm.warp(block.timestamp + 2 days);
+    manager.adminResolveMarket(marketId, 0);
+
+    vm.expectRevert("resolved");
+    manager.adminSetClosesAt(marketId, block.timestamp + 1 days);
+  }
+
+  function testSetClosesAtNotAdminReverts() public {
+    vm.prank(maker);
+    vm.expectRevert("not market admin");
+    manager.adminSetClosesAt(marketId, block.timestamp + 2 days);
+  }
+
+  function testSetNegRiskAdapterEmitsEvent() public {
+    address oldAdapter = manager.negRiskAdapter();
+    address newAdapter = address(0xADA);
+    vm.expectEmit(true, true, false, false, address(manager));
+    emit PredictionMarketV3ManagerCLOB.NegRiskAdapterUpdated(oldAdapter, newAdapter);
+    manager.setNegRiskAdapter(newAdapter);
   }
 
   function testFillZeroReverts() public {
@@ -953,7 +1011,7 @@ contract PredictionMarketCLOBTest is Test {
     bytes memory makerSig = _signOrder(makerOrder, makerPk);
     bytes memory takerSig = _signOrder(takerOrder, takerPk);
 
-    vm.expectRevert("market paused");
+    vm.expectRevert("market not tradeable");
     exchange.matchOrdersWithFees(makerOrder, makerSig, takerOrder, takerSig, amount);
 
     manager.pauseMarket(marketId, false);
@@ -1108,6 +1166,15 @@ contract PredictionMarketCLOBTest is Test {
     vm.warp(block.timestamp + 2 days);
 
     oracle.setResult(marketId, 5, true);
+
+    vm.expectRevert("invalid outcome");
+    manager.resolveMarket(marketId);
+  }
+
+  function testOracleVoidOutcomeReverts() public {
+    vm.warp(block.timestamp + 2 days);
+
+    oracle.setResult(marketId, -1, true);
 
     vm.expectRevert("invalid outcome");
     manager.resolveMarket(marketId);
@@ -1373,6 +1440,66 @@ contract PredictionMarketCLOBTest is Test {
 
     bytes32 orderHash = exchange.hashOrder(order);
     assertTrue(exchange.orderInvalidated(orderHash));
+  }
+
+  // =========================================================================
+  // setCallbackGasLimit
+  // =========================================================================
+
+  function testSetCallbackGasLimit() public {
+    assertEq(exchange.callbackGasLimit(), 100_000);
+
+    exchange.setCallbackGasLimit(200_000);
+    assertEq(exchange.callbackGasLimit(), 200_000);
+  }
+
+  function testSetCallbackGasLimitEmitsEvent() public {
+    vm.expectEmit(false, false, false, true);
+    emit MyriadCTFExchange.CallbackGasLimitUpdated(100_000, 250_000);
+    exchange.setCallbackGasLimit(250_000);
+  }
+
+  function testSetCallbackGasLimitNotAdminReverts() public {
+    vm.prank(taker);
+    vm.expectRevert("not admin");
+    exchange.setCallbackGasLimit(200_000);
+  }
+
+  function testSetCallbackGasLimitTooLowReverts() public {
+    vm.expectRevert("limit too low");
+    exchange.setCallbackGasLimit(49_999);
+  }
+
+  function testSetCallbackGasLimitMinimumAllowed() public {
+    exchange.setCallbackGasLimit(50_000);
+    assertEq(exchange.callbackGasLimit(), 50_000);
+  }
+
+  function testMatchStillWorksAfterGasLimitChange() public {
+    exchange.setCallbackGasLimit(200_000);
+
+    uint256 amount = 100 ether;
+    uint256 price = (60 * ONE) / 100;
+
+    collateral.mint(maker, 1000 ether);
+    collateral.mint(taker, 1000 ether);
+
+    vm.prank(maker);
+    collateral.approve(address(conditionalTokens), type(uint256).max);
+    vm.prank(maker);
+    conditionalTokens.splitPosition(marketId, amount);
+    vm.prank(maker);
+    conditionalTokens.setApprovalForAll(address(exchange), true);
+    vm.prank(taker);
+    collateral.approve(address(exchange), type(uint256).max);
+
+    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Sell, amount, price, 1100);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, price, 1101);
+
+    exchange.matchOrdersWithFees(m, _signOrder(m, makerPk), t, _signOrder(t, takerPk), amount);
+
+    uint256 tokenId = conditionalTokens.getTokenId(marketId, 0);
+    assertEq(conditionalTokens.balanceOf(taker, tokenId), amount);
   }
 
   // =========================================================================

@@ -135,6 +135,23 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     adapter.createEvent("Duplicate event", params);
   }
 
+  function testCreateEventClosesAtMismatchReverts() public {
+    PredictionMarketV3ManagerCLOB.CreateMarketParams[] memory params =
+      new PredictionMarketV3ManagerCLOB.CreateMarketParams[](3);
+    params[0] = _mkParam("Trump");
+    params[1] = _mkParam("Harris");
+    params[2] = PredictionMarketV3ManagerCLOB.CreateMarketParams({
+      closesAt: block.timestamp + 2 days,
+      question: "Biden",
+      image: "",
+      feeModule: address(feeModule),
+      oracle: address(0),
+      oracleData: ""
+    });
+    vm.expectRevert("closesAt mismatch");
+    adapter.createEvent("Who will win?", params);
+  }
+
   // =========================================================================
   // Split / Merge
   // =========================================================================
@@ -473,12 +490,449 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     uint256 bobFee = (bobNotional * 100) / BPS;
     assertEq(bobSpent, bobNotional + bobFee, "bob pays notional + fee");
 
-    uint256 charlieNotional = amount - aliceNotional - bobNotional;
+    uint256 charlieNotional = (amount * price2) / ONE;
     uint256 charlieFee = (charlieNotional * 300) / BPS;
     assertEq(charlieSpent, charlieNotional + charlieFee, "charlie pays notional + fee");
 
     uint256 totalFees = aliceFee + bobFee + charlieFee;
     assertEq(wcol.balanceOf(address(feeModule)), totalFees, "feeModule received fees");
+  }
+
+  // =========================================================================
+  // Cross-market surplus (priceSum > ONE)
+  // =========================================================================
+
+  function testCrossMarketSurplusGoesToFeeModule() public {
+    (, uint256[] memory marketIds) = _createThreeOutcomeEvent();
+    uint256 fillAmount = 100 ether;
+
+    for (uint256 i = 0; i < 3; i++) {
+      _setUniformFees(marketIds[i], 0, 0);
+    }
+
+    uint256 fundAmount = 200 ether;
+    address[3] memory users = [alice, bob, charlie];
+    uint256[3] memory pks = [alicePk, bobPk, charliePk];
+    for (uint256 i = 0; i < 3; i++) {
+      collateral.mint(users[i], fundAmount);
+      vm.startPrank(users[i]);
+      collateral.approve(address(wcol), fundAmount);
+      wcol.wrap(fundAmount);
+      IERC20(address(wcol)).approve(address(exchange), type(uint256).max);
+      conditionalTokens.setApprovalForAll(address(exchange), true);
+      vm.stopPrank();
+    }
+
+    // priceSum = 0.60 + 0.60 + 0.10 = 1.30
+    uint256 price0 = (60 * ONE) / 100;
+    uint256 price1 = (60 * ONE) / 100;
+    uint256 price2 = (10 * ONE) / 100;
+
+    MyriadCTFExchange.Order[] memory orders = new MyriadCTFExchange.Order[](3);
+    orders[0] = _buildOrder(alice, marketIds[0], 0, MyriadCTFExchange.Side.Buy, fillAmount, price0, 200);
+    orders[1] = _buildOrder(bob, marketIds[1], 0, MyriadCTFExchange.Side.Buy, fillAmount, price1, 201);
+    orders[2] = _buildOrder(charlie, marketIds[2], 0, MyriadCTFExchange.Side.Buy, fillAmount, price2, 202);
+
+    bytes[] memory sigs = new bytes[](3);
+    for (uint256 i = 0; i < 3; i++) {
+      sigs[i] = _signOrder(orders[i], pks[i]);
+    }
+
+    uint256 aliceBefore = wcol.balanceOf(alice);
+    uint256 bobBefore = wcol.balanceOf(bob);
+    uint256 charlieBefore = wcol.balanceOf(charlie);
+    uint256 feeModuleBefore = wcol.balanceOf(address(feeModule));
+
+    exchange.matchCrossMarketOrders(orders, sigs, fillAmount);
+
+    // Each buyer pays their own notional — no free tokens
+    uint256 aliceNotional = (fillAmount * price0) / ONE;
+    uint256 bobNotional = (fillAmount * price1) / ONE;
+    uint256 charlieNotional = (fillAmount * price2) / ONE;
+
+    assertEq(aliceBefore - wcol.balanceOf(alice), aliceNotional, "alice pays her notional");
+    assertEq(bobBefore - wcol.balanceOf(bob), bobNotional, "bob pays his notional");
+    assertEq(charlieBefore - wcol.balanceOf(charlie), charlieNotional, "charlie pays his notional");
+
+    // All three received their YES tokens
+    for (uint256 i = 0; i < 3; i++) {
+      assertEq(conditionalTokens.balanceOf(users[i], conditionalTokens.getTokenId(marketIds[i], 0)), fillAmount);
+    }
+
+    // Surplus = totalNotional - fillAmount = 130 - 100 = 30 → sent to feeModule
+    uint256 surplus = (aliceNotional + bobNotional + charlieNotional) - fillAmount;
+    assertEq(surplus, 30 ether, "surplus is 30");
+    assertEq(wcol.balanceOf(address(feeModule)) - feeModuleBefore, surplus, "feeModule received surplus");
+
+    // Nothing stuck in exchange
+    assertEq(wcol.balanceOf(address(exchange)), 0, "exchange has no stuck funds");
+  }
+
+  function testCrossMarketSurplusEmitsEvent() public {
+    (, uint256[] memory marketIds) = _createThreeOutcomeEvent();
+    uint256 fillAmount = 100 ether;
+
+    for (uint256 i = 0; i < 3; i++) {
+      _setUniformFees(marketIds[i], 0, 0);
+    }
+
+    uint256 fundAmount = 200 ether;
+    address[3] memory users = [alice, bob, charlie];
+    uint256[3] memory pks = [alicePk, bobPk, charliePk];
+    for (uint256 i = 0; i < 3; i++) {
+      collateral.mint(users[i], fundAmount);
+      vm.startPrank(users[i]);
+      collateral.approve(address(wcol), fundAmount);
+      wcol.wrap(fundAmount);
+      IERC20(address(wcol)).approve(address(exchange), type(uint256).max);
+      conditionalTokens.setApprovalForAll(address(exchange), true);
+      vm.stopPrank();
+    }
+
+    bytes32 eventId = manager.getEventId(marketIds[0]);
+
+    // priceSum = 0.50 + 0.40 + 0.30 = 1.20
+    uint256 price0 = (50 * ONE) / 100;
+    uint256 price1 = (40 * ONE) / 100;
+    uint256 price2 = (30 * ONE) / 100;
+
+    MyriadCTFExchange.Order[] memory orders = new MyriadCTFExchange.Order[](3);
+    orders[0] = _buildOrder(alice, marketIds[0], 0, MyriadCTFExchange.Side.Buy, fillAmount, price0, 300);
+    orders[1] = _buildOrder(bob, marketIds[1], 0, MyriadCTFExchange.Side.Buy, fillAmount, price1, 301);
+    orders[2] = _buildOrder(charlie, marketIds[2], 0, MyriadCTFExchange.Side.Buy, fillAmount, price2, 302);
+
+    bytes[] memory sigs = new bytes[](3);
+    for (uint256 i = 0; i < 3; i++) {
+      sigs[i] = _signOrder(orders[i], pks[i]);
+    }
+
+    uint256 expectedSurplus = (fillAmount * price0) / ONE + (fillAmount * price1) / ONE + (fillAmount * price2) / ONE - fillAmount;
+
+    vm.expectEmit(true, false, false, true, address(exchange));
+    emit MyriadCTFExchange.SurplusCollected(eventId, expectedSurplus);
+
+    exchange.matchCrossMarketOrders(orders, sigs, fillAmount);
+  }
+
+  function testCrossMarketSurplusWithFees() public {
+    (, uint256[] memory marketIds) = _createThreeOutcomeEvent();
+    uint256 fillAmount = 100 ether;
+
+    for (uint256 i = 0; i < 3; i++) {
+      _setUniformFees(marketIds[i], 100, 200); // 1% maker, 2% taker
+    }
+
+    uint256 fundAmount = 200 ether;
+    address[3] memory users = [alice, bob, charlie];
+    uint256[3] memory pks = [alicePk, bobPk, charliePk];
+    for (uint256 i = 0; i < 3; i++) {
+      collateral.mint(users[i], fundAmount);
+      vm.startPrank(users[i]);
+      collateral.approve(address(wcol), fundAmount);
+      wcol.wrap(fundAmount);
+      IERC20(address(wcol)).approve(address(exchange), type(uint256).max);
+      conditionalTokens.setApprovalForAll(address(exchange), true);
+      vm.stopPrank();
+    }
+
+    // priceSum = 0.50 + 0.40 + 0.20 = 1.10
+    uint256 price0 = (50 * ONE) / 100;
+    uint256 price1 = (40 * ONE) / 100;
+    uint256 price2 = (20 * ONE) / 100;
+
+    MyriadCTFExchange.Order[] memory orders = new MyriadCTFExchange.Order[](3);
+    orders[0] = _buildOrder(alice, marketIds[0], 0, MyriadCTFExchange.Side.Buy, fillAmount, price0, 400);
+    orders[1] = _buildOrder(bob, marketIds[1], 0, MyriadCTFExchange.Side.Buy, fillAmount, price1, 401);
+    orders[2] = _buildOrder(charlie, marketIds[2], 0, MyriadCTFExchange.Side.Buy, fillAmount, price2, 402);
+
+    bytes[] memory sigs = new bytes[](3);
+    for (uint256 i = 0; i < 3; i++) {
+      sigs[i] = _signOrder(orders[i], pks[i]);
+    }
+
+    uint256 aliceBefore = wcol.balanceOf(alice);
+    uint256 bobBefore = wcol.balanceOf(bob);
+    uint256 charlieBefore = wcol.balanceOf(charlie);
+    uint256 feeModuleBefore = wcol.balanceOf(address(feeModule));
+
+    exchange.matchCrossMarketOrders(orders, sigs, fillAmount);
+
+    // Each buyer pays notional + their respective fee
+    uint256 aliceNotional = (fillAmount * price0) / ONE;
+    uint256 aliceFee = (aliceNotional * 100) / BPS; // 1% maker
+    assertEq(aliceBefore - wcol.balanceOf(alice), aliceNotional + aliceFee, "alice pays notional + maker fee");
+
+    uint256 bobNotional = (fillAmount * price1) / ONE;
+    uint256 bobFee = (bobNotional * 100) / BPS; // 1% maker
+    assertEq(bobBefore - wcol.balanceOf(bob), bobNotional + bobFee, "bob pays notional + maker fee");
+
+    uint256 charlieNotional = (fillAmount * price2) / ONE;
+    uint256 charlieFee = (charlieNotional * 200) / BPS; // 2% taker
+    assertEq(charlieBefore - wcol.balanceOf(charlie), charlieNotional + charlieFee, "charlie pays notional + taker fee");
+
+    // feeModule receives surplus + all fees
+    uint256 surplus = (aliceNotional + bobNotional + charlieNotional) - fillAmount;
+    uint256 totalFees = aliceFee + bobFee + charlieFee;
+    assertEq(
+      wcol.balanceOf(address(feeModule)) - feeModuleBefore,
+      surplus + totalFees,
+      "feeModule received surplus + fees"
+    );
+  }
+
+  function testCrossMarketNoSurplusWhenPriceSumExactlyOne() public {
+    (, uint256[] memory marketIds) = _createThreeOutcomeEvent();
+    uint256 fillAmount = 100 ether;
+
+    for (uint256 i = 0; i < 3; i++) {
+      _setUniformFees(marketIds[i], 0, 0);
+    }
+
+    uint256 fundAmount = 200 ether;
+    address[3] memory users = [alice, bob, charlie];
+    uint256[3] memory pks = [alicePk, bobPk, charliePk];
+    for (uint256 i = 0; i < 3; i++) {
+      collateral.mint(users[i], fundAmount);
+      vm.startPrank(users[i]);
+      collateral.approve(address(wcol), fundAmount);
+      wcol.wrap(fundAmount);
+      IERC20(address(wcol)).approve(address(exchange), type(uint256).max);
+      conditionalTokens.setApprovalForAll(address(exchange), true);
+      vm.stopPrank();
+    }
+
+    // priceSum = 0.45 + 0.35 + 0.20 = 1.00 exactly
+    uint256 price0 = (45 * ONE) / 100;
+    uint256 price1 = (35 * ONE) / 100;
+    uint256 price2 = (20 * ONE) / 100;
+
+    MyriadCTFExchange.Order[] memory orders = new MyriadCTFExchange.Order[](3);
+    orders[0] = _buildOrder(alice, marketIds[0], 0, MyriadCTFExchange.Side.Buy, fillAmount, price0, 500);
+    orders[1] = _buildOrder(bob, marketIds[1], 0, MyriadCTFExchange.Side.Buy, fillAmount, price1, 501);
+    orders[2] = _buildOrder(charlie, marketIds[2], 0, MyriadCTFExchange.Side.Buy, fillAmount, price2, 502);
+
+    bytes[] memory sigs = new bytes[](3);
+    for (uint256 i = 0; i < 3; i++) {
+      sigs[i] = _signOrder(orders[i], pks[i]);
+    }
+
+    uint256 feeModuleBefore = wcol.balanceOf(address(feeModule));
+
+    exchange.matchCrossMarketOrders(orders, sigs, fillAmount);
+
+    // No surplus, no fees → feeModule balance unchanged
+    assertEq(wcol.balanceOf(address(feeModule)), feeModuleBefore, "no surplus when priceSum == ONE");
+    assertEq(wcol.balanceOf(address(exchange)), 0, "exchange has no stuck funds");
+  }
+
+  function testCrossMarketRoundingShortfallHandled() public {
+    (, uint256[] memory marketIds) = _createThreeOutcomeEvent();
+    // fillAmount that causes rounding: (1e18+1) * 0.45e18 / 1e18 rounds down
+    uint256 fillAmount = 1 ether + 1;
+
+    for (uint256 i = 0; i < 3; i++) {
+      _setUniformFees(marketIds[i], 0, 0);
+    }
+
+    uint256 fundAmount = 10 ether;
+    address[3] memory users = [alice, bob, charlie];
+    uint256[3] memory pks = [alicePk, bobPk, charliePk];
+    for (uint256 i = 0; i < 3; i++) {
+      collateral.mint(users[i], fundAmount);
+      vm.startPrank(users[i]);
+      collateral.approve(address(wcol), fundAmount);
+      wcol.wrap(fundAmount);
+      IERC20(address(wcol)).approve(address(exchange), type(uint256).max);
+      conditionalTokens.setApprovalForAll(address(exchange), true);
+      vm.stopPrank();
+    }
+
+    // priceSum = 0.45 + 0.35 + 0.20 = 1.00 exactly
+    // With fillAmount = 1e18+1, naive notionals:
+    //   floor((1e18+1) * 0.45e18 / 1e18) = 450000000000000000
+    //   floor((1e18+1) * 0.35e18 / 1e18) = 350000000000000000
+    //   floor((1e18+1) * 0.20e18 / 1e18) = 200000000000000000
+    //   sum = 1e18, short by 1 wei — taker absorbs it
+    uint256 price0 = (45 * ONE) / 100;
+    uint256 price1 = (35 * ONE) / 100;
+    uint256 price2 = (20 * ONE) / 100;
+
+    MyriadCTFExchange.Order[] memory orders = new MyriadCTFExchange.Order[](3);
+    orders[0] = _buildOrder(alice, marketIds[0], 0, MyriadCTFExchange.Side.Buy, fillAmount, price0, 600);
+    orders[1] = _buildOrder(bob, marketIds[1], 0, MyriadCTFExchange.Side.Buy, fillAmount, price1, 601);
+    orders[2] = _buildOrder(charlie, marketIds[2], 0, MyriadCTFExchange.Side.Buy, fillAmount, price2, 602);
+
+    bytes[] memory sigs = new bytes[](3);
+    for (uint256 i = 0; i < 3; i++) {
+      sigs[i] = _signOrder(orders[i], pks[i]);
+    }
+
+    uint256 charlieBefore = wcol.balanceOf(charlie);
+
+    // Should not revert despite rounding shortfall
+    exchange.matchCrossMarketOrders(orders, sigs, fillAmount);
+
+    // All buyers received their tokens
+    for (uint256 i = 0; i < 3; i++) {
+      assertEq(conditionalTokens.balanceOf(users[i], conditionalTokens.getTokenId(marketIds[i], 0)), fillAmount);
+    }
+
+    // Charlie (taker) paid 1 wei more than naive notional to cover rounding
+    uint256 naiveNotional = (fillAmount * price2) / ONE;
+    uint256 charlieActualPaid = charlieBefore - wcol.balanceOf(charlie);
+    assertGt(charlieActualPaid, naiveNotional, "taker absorbed rounding dust");
+    assertLe(charlieActualPaid - naiveNotional, 2, "dust is at most N-1 wei");
+
+    // No stuck funds
+    assertEq(wcol.balanceOf(address(exchange)), 0, "exchange has no stuck funds");
+  }
+
+  // =========================================================================
+  // Void event
+  // =========================================================================
+
+  function testVoidEvent5050() public {
+    (bytes32 eventId, uint256[] memory marketIds) = _createThreeOutcomeEvent();
+    uint256 amount = 100 ether;
+
+    collateral.mint(alice, amount);
+    vm.startPrank(alice);
+    collateral.approve(address(adapter), amount);
+    adapter.splitPosition(eventId, 0, amount);
+    vm.stopPrank();
+
+    uint256[] memory yesPayouts = new uint256[](3);
+    yesPayouts[0] = ONE / 2;
+    yesPayouts[1] = ONE / 2;
+    yesPayouts[2] = ONE / 2;
+
+    vm.warp(block.timestamp + 2 days);
+    adapter.voidEvent(eventId, yesPayouts);
+
+    (, bool resolved, int256 winningIndex,,) = adapter.getEvent(eventId);
+    assertTrue(resolved);
+    assertEq(winningIndex, -2);
+
+    for (uint256 i = 0; i < 3; i++) {
+      assertEq(manager.getMarketResolvedOutcome(marketIds[i]), -1);
+    }
+
+    // Alice redeems voided position for market 0 (has YES + NO)
+    vm.prank(alice);
+    conditionalTokens.redeemVoided(marketIds[0]);
+
+    uint256 aliceWcol = wcol.balanceOf(alice);
+    assertEq(aliceWcol, amount);
+    vm.prank(alice);
+    wcol.unwrap(amount);
+    assertEq(collateral.balanceOf(alice), amount);
+  }
+
+  function testVoidEventAsymmetricPayouts() public {
+    (bytes32 eventId, uint256[] memory marketIds) = _createThreeOutcomeEvent();
+    uint256 amount = 100 ether;
+
+    // Alice splits in outcome 0 and converts → YES(0), YES(1), YES(2)
+    collateral.mint(alice, amount);
+    vm.startPrank(alice);
+    collateral.approve(address(adapter), amount);
+    adapter.splitPosition(eventId, 0, amount);
+    conditionalTokens.setApprovalForAll(address(adapter), true);
+    adapter.convertPositions(eventId, 0, amount);
+    vm.stopPrank();
+
+    uint256[] memory yesPayouts = new uint256[](3);
+    yesPayouts[0] = (60 * ONE) / 100;
+    yesPayouts[1] = (30 * ONE) / 100;
+    yesPayouts[2] = (10 * ONE) / 100;
+
+    vm.warp(block.timestamp + 2 days);
+    adapter.voidEvent(eventId, yesPayouts);
+
+    // Alice holds YES for all 3 markets, redeem each
+    for (uint256 i = 0; i < 3; i++) {
+      vm.prank(alice);
+      conditionalTokens.redeemVoided(marketIds[i]);
+    }
+
+    uint256 aliceWcol = wcol.balanceOf(alice);
+    uint256 expected = (amount * 60) / 100 + (amount * 30) / 100 + (amount * 10) / 100;
+    assertEq(aliceWcol, expected);
+  }
+
+  function testVoidEventRedeemNOPositions() public {
+    (bytes32 eventId, uint256[] memory marketIds) = _createThreeOutcomeEvent();
+    uint256 amount = 100 ether;
+
+    // Alice splits and converts → adapter holds NO tokens + minted wcol
+    collateral.mint(alice, amount);
+    vm.startPrank(alice);
+    collateral.approve(address(adapter), amount);
+    adapter.splitPosition(eventId, 0, amount);
+    conditionalTokens.setApprovalForAll(address(adapter), true);
+    adapter.convertPositions(eventId, 0, amount);
+    vm.stopPrank();
+
+    uint256 mintedBefore = adapter.mintedWcolPerEvent(eventId);
+    assertGt(mintedBefore, 0);
+
+    uint256[] memory yesPayouts = new uint256[](3);
+    yesPayouts[0] = (50 * ONE) / 100;
+    yesPayouts[1] = (50 * ONE) / 100;
+    yesPayouts[2] = (50 * ONE) / 100;
+
+    vm.warp(block.timestamp + 2 days);
+    adapter.voidEvent(eventId, yesPayouts);
+
+    // Adapter redeems its NO positions from voided markets
+    adapter.redeemNOPositions(eventId);
+    assertEq(adapter.mintedWcolPerEvent(eventId), 0);
+    assertTrue(adapter.noPositionsRedeemed(eventId));
+  }
+
+  function testVoidEventLengthMismatchReverts() public {
+    (bytes32 eventId,) = _createThreeOutcomeEvent();
+
+    uint256[] memory yesPayouts = new uint256[](2);
+    yesPayouts[0] = ONE / 2;
+    yesPayouts[1] = ONE / 2;
+
+    vm.expectRevert("length mismatch");
+    adapter.voidEvent(eventId, yesPayouts);
+  }
+
+  function testVoidEventAlreadyResolvedReverts() public {
+    (bytes32 eventId,) = _createThreeOutcomeEvent();
+    vm.warp(block.timestamp + 2 days);
+    adapter.resolveEvent(eventId, 0);
+
+    uint256[] memory yesPayouts = new uint256[](3);
+    yesPayouts[0] = ONE / 2;
+    yesPayouts[1] = ONE / 2;
+    yesPayouts[2] = ONE / 2;
+
+    vm.expectRevert("already resolved");
+    adapter.voidEvent(eventId, yesPayouts);
+  }
+
+  function testVoidEventNotResolutionAdminReverts() public {
+    (bytes32 eventId,) = _createThreeOutcomeEvent();
+
+    uint256[] memory yesPayouts = new uint256[](3);
+    yesPayouts[0] = ONE / 2;
+    yesPayouts[1] = ONE / 2;
+    yesPayouts[2] = ONE / 2;
+
+    vm.prank(alice);
+    vm.expectRevert("not resolution admin");
+    adapter.voidEvent(eventId, yesPayouts);
+  }
+
+  function testAdminVoidNegRiskDirectlyReverts() public {
+    (, uint256[] memory marketIds) = _createThreeOutcomeEvent();
+
+    vm.expectRevert("use adapter for neg risk");
+    manager.adminVoidMarket(marketIds[0], ONE / 2, ONE / 2);
   }
 
   // =========================================================================
@@ -517,6 +971,26 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
 
     vm.expectRevert("already redeemed");
     adapter.redeemNOPositions(eventId);
+  }
+
+  // =========================================================================
+  // Setter event tests
+  // =========================================================================
+
+  function testSetTreasuryEmitsEvent() public {
+    address oldTreasury = adapter.treasury();
+    address newTreasury = address(0xBEEF);
+    vm.expectEmit(true, true, false, false, address(adapter));
+    emit NegRiskAdapter.TreasuryUpdated(oldTreasury, newTreasury);
+    adapter.setTreasury(newTreasury);
+  }
+
+  function testSetExchangeEmitsEvent() public {
+    address oldExchange = adapter.exchange();
+    address newExchange = address(0xCAFE);
+    vm.expectEmit(true, true, false, false, address(adapter));
+    emit NegRiskAdapter.ExchangeUpdated(oldExchange, newExchange);
+    adapter.setExchange(newExchange);
   }
 
   // =========================================================================
