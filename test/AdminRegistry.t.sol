@@ -152,6 +152,33 @@ contract AdminRegistryTest is Test {
         registry.proposeAdmin(bob);
     }
 
+    function testProposeAdminRejectsSelfProposal() public {
+        vm.expectRevert("cannot self-propose");
+        registry.proposeAdmin(admin);
+    }
+
+    // =========================================================================
+    // grantRole / revokeRole / renounceRole bypass prevention
+    // =========================================================================
+
+    function testGrantDefaultAdminRoleDirectlyReverts() public {
+        bytes32 role = registry.DEFAULT_ADMIN_ROLE();
+        vm.expectRevert("use proposeAdmin/acceptAdmin");
+        registry.grantRole(role, alice);
+    }
+
+    function testRevokeDefaultAdminRoleDirectlyReverts() public {
+        bytes32 role = registry.DEFAULT_ADMIN_ROLE();
+        vm.expectRevert("use proposeAdmin/acceptAdmin");
+        registry.revokeRole(role, admin);
+    }
+
+    function testRenounceDefaultAdminRoleReverts() public {
+        bytes32 role = registry.DEFAULT_ADMIN_ROLE();
+        vm.expectRevert("use proposeAdmin/acceptAdmin");
+        registry.renounceRole(role, admin);
+    }
+
     function testProposeAdminCanRepropose() public {
         registry.proposeAdmin(alice);
         assertEq(registry.pendingAdmin(), alice);
@@ -278,5 +305,22 @@ contract AdminRegistryTest is Test {
         assertTrue(registry.hasRole(registry.DEFAULT_ADMIN_ROLE(), bob));
         assertFalse(registry.hasRole(registry.DEFAULT_ADMIN_ROLE(), alice));
         assertFalse(registry.hasRole(registry.DEFAULT_ADMIN_ROLE(), admin));
+    }
+
+    function testAcceptAdminRevokesAllRolesFromOldAdmin() public {
+        registry.grantRole(registry.MARKET_ADMIN_ROLE(), admin);
+        registry.grantRole(registry.OPERATOR_ROLE(), admin);
+        registry.grantRole(registry.FEE_ADMIN_ROLE(), admin);
+        registry.grantRole(registry.RESOLUTION_ADMIN_ROLE(), admin);
+
+        registry.proposeAdmin(alice);
+        vm.prank(alice);
+        registry.acceptAdmin();
+
+        assertFalse(registry.hasRole(registry.DEFAULT_ADMIN_ROLE(), admin));
+        assertFalse(registry.hasRole(registry.MARKET_ADMIN_ROLE(), admin));
+        assertFalse(registry.hasRole(registry.OPERATOR_ROLE(), admin));
+        assertFalse(registry.hasRole(registry.FEE_ADMIN_ROLE(), admin));
+        assertFalse(registry.hasRole(registry.RESOLUTION_ADMIN_ROLE(), admin));
     }
 }

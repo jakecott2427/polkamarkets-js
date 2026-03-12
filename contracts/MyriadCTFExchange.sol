@@ -7,12 +7,13 @@ import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts/token/ERC1155/utils/ERC1155Holder.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
 import "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol";
 
 import "./AdminRegistry.sol";
 import "./ConditionalTokens.sol";
 import "./IMyriadMarketManager.sol";
+import "./Outcomes.sol";
 
 /// @dev Minimal interface consumed by the exchange. FeeModule implements these.
 interface IFeeModule {
@@ -242,7 +243,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
     for (uint256 i = 0; i < orders.length; i++) {
       Order calldata order = orders[i];
       require(order.side == Side.Buy, "not buy");
-      require(order.outcomeId == 0, "not YES");
+      require(order.outcomeId == Outcomes.YES, "not YES");
       require(order.price > 0 && order.price <= ONE, "bad price");
       // Verify every order's market maps to the same eventId
       require(manager.getEventId(order.marketId) == eventId, "event mismatch");
@@ -301,7 +302,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
 
     // Distribute YES tokens (fillAmount per outcome) to each buyer
     for (uint256 i = 0; i < orders.length; i++) {
-      uint256 tokenId = conditionalTokens.getTokenId(orders[i].marketId, 0);
+      uint256 tokenId = conditionalTokens.getTokenId(orders[i].marketId, Outcomes.YES);
       _safeTransferWithGasCap(address(this), orders[i].trader, tokenId, fillAmount);
 
       bytes32 orderHash = hashOrder(orders[i]);
@@ -408,15 +409,16 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
   function _validateOrder(Order calldata order, bytes calldata signature) internal view {
     require(order.trader != address(0), "trader 0");
     require(order.amount > 0, "amount 0");
-    require(order.expiration == 0 || order.expiration >= block.timestamp, "expired");
+    require(order.expiration == 0 || order.expiration > block.timestamp, "expired");
     require(order.outcomeId < 2, "bad outcome");
 
     bytes32 orderHash = hashOrder(order);
     require(!orderInvalidated[orderHash], "invalidated");
 
-    (address signer, ECDSA.RecoverError recoverError, ) = ECDSA.tryRecover(orderHash, signature);
-    require(recoverError == ECDSA.RecoverError.NoError, "invalid signature");
-    require(signer == order.trader, "signer mismatch");
+    require(
+      SignatureChecker.isValidSignatureNow(order.trader, orderHash, signature),
+      "invalid signature"
+    );
   }
 
   function _validateFeeConfig(FeeConfig memory feeConfig) internal pure {
@@ -514,7 +516,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
     require(maker.outcomeId != taker.outcomeId, "same outcome");
     _requireMarketOpen(maker.marketId);
 
-    (Order calldata outcome0Order, Order calldata outcome1Order) = maker.outcomeId == 0 ? (maker, taker) : (taker, maker);
+    (Order calldata outcome0Order, Order calldata outcome1Order) = maker.outcomeId == Outcomes.YES ? (maker, taker) : (taker, maker);
     require(outcome0Order.price + outcome1Order.price == ONE, "price sum");
 
     IERC20 collateral = manager.getMarketCollateral(maker.marketId);
@@ -537,11 +539,11 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
     // Each buyer receives fillAmount shares of their outcome token
     _safeTransferWithGasCap(
       address(this), outcome0Order.trader,
-      conditionalTokens.getTokenId(maker.marketId, 0), fillAmount
+      conditionalTokens.getTokenId(maker.marketId, Outcomes.YES), fillAmount
     );
     _safeTransferWithGasCap(
       address(this), outcome1Order.trader,
-      conditionalTokens.getTokenId(maker.marketId, 1), fillAmount
+      conditionalTokens.getTokenId(maker.marketId, Outcomes.NO), fillAmount
     );
 
     // Fees to FeeModule
@@ -563,11 +565,11 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
     require(maker.outcomeId != taker.outcomeId, "same outcome");
     _requireMarketOpen(maker.marketId);
 
-    (Order calldata outcome0Order, Order calldata outcome1Order) = maker.outcomeId == 0 ? (maker, taker) : (taker, maker);
+    (Order calldata outcome0Order, Order calldata outcome1Order) = maker.outcomeId == Outcomes.YES ? (maker, taker) : (taker, maker);
     require(outcome0Order.price + outcome1Order.price == ONE, "price sum");
 
-    uint256 outcome0TokenId = conditionalTokens.getTokenId(maker.marketId, 0);
-    uint256 outcome1TokenId = conditionalTokens.getTokenId(maker.marketId, 1);
+    uint256 outcome0TokenId = conditionalTokens.getTokenId(maker.marketId, Outcomes.YES);
+    uint256 outcome1TokenId = conditionalTokens.getTokenId(maker.marketId, Outcomes.NO);
 
     // Transfer outcome tokens to exchange before merging
     conditionalTokens.safeTransferFrom(outcome0Order.trader, address(this), outcome0TokenId, fillAmount, "");
@@ -625,7 +627,6 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
   }
 
   function _requireMarketOpen(uint256 marketId) internal view {
-    require(manager.getMarketState(marketId) == IMyriadMarketManager.MarketState.open, "market closed");
-    require(!manager.isMarketPaused(marketId), "market paused");
+    require(manager.isMarketTradeable(marketId), "market not tradeable");
   }
 }
