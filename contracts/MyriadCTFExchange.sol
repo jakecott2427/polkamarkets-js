@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardTransientUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
@@ -35,7 +35,7 @@ interface INegRiskAdapter {
 /// @notice On-chain settlement engine for matched signed orders with partial fill support.
 ///         Buyer fees are added on top of notional; seller fees are deducted from proceeds.
 ///         Shares always transfer in full (fillAmount), never reduced by fees.
-contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, PausableUpgradeable, ERC1155Holder, UUPSUpgradeable, EIP712Upgradeable {
+contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable, PausableUpgradeable, ERC1155Holder, UUPSUpgradeable, EIP712Upgradeable {
   using SafeERC20 for IERC20;
 
   enum Side {
@@ -126,7 +126,6 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
     require(_feeModule != address(0), "fee module 0");
     require(address(_registry) != address(0), "registry 0");
 
-    __ReentrancyGuard_init();
     __Pausable_init();
     __UUPSUpgradeable_init();
     __EIP712_init("MyriadCTFExchange", "1");
