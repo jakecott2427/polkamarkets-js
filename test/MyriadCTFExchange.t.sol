@@ -225,6 +225,14 @@ contract MyriadCTFExchangeTest is Test {
         assertEq(exchange.negRiskAdapter(), adapter);
     }
 
+    function testSetNegRiskAdapterEmitsEvent() public {
+        address oldAdapter = exchange.negRiskAdapter();
+        address newAdapter = address(0xADA);
+        vm.expectEmit(true, true, false, false, address(exchange));
+        emit MyriadCTFExchange.NegRiskAdapterUpdated(oldAdapter, newAdapter);
+        exchange.setNegRiskAdapter(newAdapter);
+    }
+
     function testInitializeWithZeroManagerReverts() public {
         MyriadCTFExchange impl = new MyriadCTFExchange();
         vm.expectRevert("manager 0");

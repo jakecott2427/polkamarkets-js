@@ -107,6 +107,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
     uint256 fillAmount,
     uint256 totalFilled
   );
+  event NegRiskAdapterUpdated(address indexed oldAdapter, address indexed newAdapter);
   event SurplusCollected(bytes32 indexed eventId, uint256 amount);
 
   /// @custom:oz-upgrades-unsafe-allow constructor
@@ -155,7 +156,9 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
 
   function setNegRiskAdapter(address _adapter) external {
     require(registry.hasRole(registry.DEFAULT_ADMIN_ROLE(), msg.sender), "not admin");
+    address old = negRiskAdapter;
     negRiskAdapter = _adapter;
+    emit NegRiskAdapterUpdated(old, _adapter);
   }
 
   function setCallbackGasLimit(uint256 _limit) external {

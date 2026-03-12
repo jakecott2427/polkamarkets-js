@@ -957,6 +957,26 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
   }
 
   // =========================================================================
+  // Setter event tests
+  // =========================================================================
+
+  function testSetTreasuryEmitsEvent() public {
+    address oldTreasury = adapter.treasury();
+    address newTreasury = address(0xBEEF);
+    vm.expectEmit(true, true, false, false, address(adapter));
+    emit NegRiskAdapter.TreasuryUpdated(oldTreasury, newTreasury);
+    adapter.setTreasury(newTreasury);
+  }
+
+  function testSetExchangeEmitsEvent() public {
+    address oldExchange = adapter.exchange();
+    address newExchange = address(0xCAFE);
+    vm.expectEmit(true, true, false, false, address(adapter));
+    emit NegRiskAdapter.ExchangeUpdated(oldExchange, newExchange);
+    adapter.setExchange(newExchange);
+  }
+
+  // =========================================================================
   // WrappedCollateral tests
   // =========================================================================
 
