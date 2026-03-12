@@ -77,10 +77,10 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardUpgradeable, Pausabl
   address public negRiskAdapter;
 
   /// @notice Tracks cancellations — once true, the order can never be matched.
-  mapping(bytes32 => bool) public orderInvalidated;
+  mapping(bytes32 orderHash => bool) public orderInvalidated;
 
   /// @notice Cumulative fill amount per order hash (supports partial fills).
-  mapping(bytes32 => uint256) public filledAmounts;
+  mapping(bytes32 orderHash => uint256 filled) public filledAmounts;
 
   /// @notice Gas cap for ERC-1155 safeTransferFrom callbacks (EIP-7702 griefing protection).
   uint256 public callbackGasLimit;
