@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardTransientUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -15,7 +15,7 @@ import "./Outcomes.sol";
 /// @title PredictionMarketV3ManagerCLOB
 /// @notice Market lifecycle registry for CLOB markets.
 ///         Resolution is delegated to pluggable oracle contracts that implement IMarketOracle.
-contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardUpgradeable, UUPSUpgradeable, IMyriadMarketManager {
+contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardTransientUpgradeable, UUPSUpgradeable, IMyriadMarketManager {
   using SafeERC20 for IERC20;
 
   struct Market {
@@ -52,8 +52,8 @@ contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardUpgradea
   IERC20 public collateralToken;
 
   uint256 public marketIndex;
-  mapping(uint256 => Market) public markets;
-  mapping(uint256 => uint256[2]) public voidedPayouts; // [outcome0Payout, outcome1Payout] in 1e18
+  mapping(uint256 marketId => Market) public markets;
+  mapping(uint256 marketId => uint256[2] payouts) public voidedPayouts; // [outcome0Payout, outcome1Payout] in 1e18
 
   /// @notice The NegRiskAdapter address, allowed to create neg risk markets.
   address public negRiskAdapter;
@@ -69,6 +69,7 @@ contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardUpgradea
   event MarketPaused(address indexed user, uint256 indexed marketId, bool paused, uint256 timestamp);
   event MarketOracleUpdated(uint256 indexed marketId, address oldOracle, address newOracle);
   event MarketClosesAtUpdated(uint256 indexed marketId, uint256 oldClosesAt, uint256 newClosesAt);
+  event NegRiskAdapterUpdated(address indexed oldAdapter, address indexed newAdapter);
 
   /// @custom:oz-upgrades-unsafe-allow constructor
   constructor() {
@@ -79,7 +80,6 @@ contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardUpgradea
     require(address(_registry) != address(0), "registry 0");
     require(address(_collateralToken) != address(0), "collateral 0");
 
-    __ReentrancyGuard_init();
     __UUPSUpgradeable_init();
 
     registry = _registry;
@@ -93,7 +93,9 @@ contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardUpgradea
 
   function setNegRiskAdapter(address _adapter) external {
     require(registry.hasRole(registry.DEFAULT_ADMIN_ROLE(), msg.sender), "not admin");
+    address old = negRiskAdapter;
     negRiskAdapter = _adapter;
+    emit NegRiskAdapterUpdated(old, _adapter);
   }
 
   function createMarket(CreateMarketParams calldata params) external nonReentrant returns (uint256 marketId) {

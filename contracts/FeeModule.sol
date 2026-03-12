@@ -39,10 +39,10 @@ contract FeeModule is Initializable, UUPSUpgradeable {
   AdminRegistry public registry;
 
   /// @dev Fee tiers per market, sorted ascending by maxPrice.
-  mapping(uint256 => FeeTier[]) internal _marketFees;
+  mapping(uint256 marketId => FeeTier[]) internal _marketFees;
 
   /// @notice Total accrued (unclaimed) fees per collateral token.
-  mapping(address => uint256) public accruedFees;
+  mapping(address token => uint256 amount) public accruedFees;
 
   /// @notice Only address allowed to push fee accruals (set to the exchange).
   address public exchange;

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC1155/utils/ERC1155Holder.sol";
 
@@ -16,7 +16,7 @@ import "./Outcomes.sol";
 ///         Provides split/merge/convert operations via WrappedCollateral
 ///         and handles batch resolution (including the "Other wins" case
 ///         where no named outcome is the winner).
-contract NegRiskAdapter is ReentrancyGuard, ERC1155Holder {
+contract NegRiskAdapter is ReentrancyGuardTransient, ERC1155Holder {
   using SafeERC20 for IERC20;
 
   // ─── Types ───────────────────────────────────────────────────────────
@@ -39,15 +39,15 @@ contract NegRiskAdapter is ReentrancyGuard, ERC1155Holder {
   address public treasury;
   address public exchange;
 
-  mapping(bytes32 => Event) internal _events;
+  mapping(bytes32 eventId => Event) internal _events;
 
   /// @dev Whether redeemNOPositions has already been called for an event.
-  mapping(bytes32 => bool) public noPositionsRedeemed;
+  mapping(bytes32 eventId => bool) public noPositionsRedeemed;
 
   /// @dev Total wcol minted (unbacked) by the adapter during convert/mintAll
   ///      operations for each event. Tracked so we know exactly how much
   ///      to burn during resolution cleanup.
-  mapping(bytes32 => uint256) public mintedWcolPerEvent;
+  mapping(bytes32 eventId => uint256 wcolMinted) public mintedWcolPerEvent;
 
   uint256 private _eventNonce;
 
@@ -61,6 +61,8 @@ contract NegRiskAdapter is ReentrancyGuard, ERC1155Holder {
   event PositionsConverted(bytes32 indexed eventId, uint256 noOutcomeIndex, address indexed user, uint256 amount);
   event AllYesTokensMinted(bytes32 indexed eventId, address indexed recipient, uint256 amount);
   event NOPositionsRedeemed(bytes32 indexed eventId, uint256 wcolRecovered, uint256 wcolBurned, uint256 excessToTreasury);
+  event TreasuryUpdated(address indexed oldTreasury, address indexed newTreasury);
+  event ExchangeUpdated(address indexed oldExchange, address indexed newExchange);
 
   // ─── Constructor ─────────────────────────────────────────────────────
 
@@ -93,13 +95,17 @@ contract NegRiskAdapter is ReentrancyGuard, ERC1155Holder {
   function setTreasury(address newTreasury) external {
     require(registry.hasRole(registry.DEFAULT_ADMIN_ROLE(), msg.sender), "not admin");
     require(newTreasury != address(0), "treasury 0");
+    address old = treasury;
     treasury = newTreasury;
+    emit TreasuryUpdated(old, newTreasury);
   }
 
   function setExchange(address _exchange) external {
     require(registry.hasRole(registry.DEFAULT_ADMIN_ROLE(), msg.sender), "not admin");
     require(_exchange != address(0), "exchange 0");
+    address old = exchange;
     exchange = _exchange;
+    emit ExchangeUpdated(old, _exchange);
   }
 
   // ─── Event lifecycle ─────────────────────────────────────────────────
