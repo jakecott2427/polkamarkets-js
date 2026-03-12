@@ -20,6 +20,32 @@ contract MockERC20 is ERC20 {
     }
 }
 
+/// @dev Mock contract wallet that burns all available gas in onERC1155Received.
+///      Also implements ERC-1271 so it can be used as a trader with the exchange.
+contract GasGriefingWallet {
+    mapping(uint256 => uint256) private _junk;
+    uint256 private _counter;
+
+    function isValidSignature(bytes32, bytes calldata) external pure returns (bytes4) {
+        return 0x1626ba7e; // ERC-1271 magic value
+    }
+
+    function onERC1155Received(address, address, uint256, uint256, bytes calldata)
+        external returns (bytes4)
+    {
+        while (gasleft() > 5000) {
+            _junk[_counter++] = gasleft();
+        }
+        return this.onERC1155Received.selector;
+    }
+
+    function onERC1155BatchReceived(address, address, uint256[] calldata, uint256[] calldata, bytes calldata)
+        external pure returns (bytes4)
+    {
+        return this.onERC1155BatchReceived.selector;
+    }
+}
+
 contract MyriadCTFExchangeTest is Test {
     uint256 private constant ONE = 1e18;
     uint256 private constant BPS = 10000;
@@ -197,6 +223,14 @@ contract MyriadCTFExchangeTest is Test {
         address adapter = address(0x5678);
         exchange.setNegRiskAdapter(adapter);
         assertEq(exchange.negRiskAdapter(), adapter);
+    }
+
+    function testSetNegRiskAdapterEmitsEvent() public {
+        address oldAdapter = exchange.negRiskAdapter();
+        address newAdapter = address(0xADA);
+        vm.expectEmit(true, true, false, false, address(exchange));
+        emit MyriadCTFExchange.NegRiskAdapterUpdated(oldAdapter, newAdapter);
+        exchange.setNegRiskAdapter(newAdapter);
     }
 
     function testInitializeWithZeroManagerReverts() public {
@@ -845,5 +879,51 @@ contract MyriadCTFExchangeTest is Test {
 
         // Fees forwarded to feeModule
         assertEq(collateral.balanceOf(address(feeModule)), makerFee + takerFee);
+    }
+
+    // =========================================================================
+    // Gas-capped ERC-1155 transfers
+    // =========================================================================
+
+    /// @dev Simulate EIP-7702: an EOA signs an order normally (ECDSA), then gets
+    ///      griefing code etched onto it. When safeTransferFrom delivers tokens,
+    ///      the callback fires but gas is capped by _safeTransferWithGasCap.
+    function testGasGriefingEIP7702BoundedInMintMatch() public {
+        collateral.mint(maker, 1000 ether);
+        collateral.mint(taker, 1000 ether);
+        _approveAll(maker);
+        _approveAll(taker);
+
+        uint256 amount = 50 ether;
+        uint256 makerPrice = (60 * ONE) / 100;
+        uint256 takerPrice = (40 * ONE) / 100;
+
+        // Maker signs order as a normal EOA
+        MyriadCTFExchange.Order memory m = _buildOrder(
+            maker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, makerPrice, 900
+        );
+        MyriadCTFExchange.Order memory t = _buildOrder(
+            taker, marketId, 1, MyriadCTFExchange.Side.Buy, amount, takerPrice, 901
+        );
+
+        bytes memory makerSig = _signOrder(m, makerPk);
+        bytes memory takerSig = _signOrder(t, takerPk);
+
+        // Simulate EIP-7702: etch griefing code onto maker's EOA address.
+        // Now maker.code.length > 0, so safeTransferFrom will call onERC1155Received.
+        GasGriefingWallet griefer = new GasGriefingWallet();
+        vm.etch(maker, address(griefer).code);
+
+        uint256 gasBefore = gasleft();
+        exchange.matchOrdersWithFees(m, makerSig, t, takerSig, amount);
+        uint256 gasUsed = gasBefore - gasleft();
+
+        // Match succeeded — maker received tokens despite griefing callback
+        uint256 tokenId = conditionalTokens.getTokenId(marketId, 0);
+        assertEq(conditionalTokens.balanceOf(maker, tokenId), amount);
+
+        // Gas bounded — without the cap, the griefing callback would consume
+        // millions of gas writing to storage. With the cap, total stays under 1M.
+        assertLt(gasUsed, 1_000_000);
     }
 }
