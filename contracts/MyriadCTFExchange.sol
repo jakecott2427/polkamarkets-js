@@ -403,16 +403,12 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
       matchType = 0;
       uint256 notional = (fillAmount * maker.price) / ONE;
       IERC20 col = manager.getMarketCollateral(maker.marketId);
-      ConditionalTokens _ct = conditionalTokens;
-      if (maker.side == Side.Buy) {
-        uint256 buyerFee = (notional * feeConfig.makerFeeBps) / BPS;
-        _checkCollateralBalance(maker.trader, col, notional + buyerFee);
-        _checkTokenBalance(taker.trader, _ct.getTokenId(maker.marketId, maker.outcomeId), fillAmount);
-      } else {
-        uint256 buyerFee = (notional * feeConfig.takerFeeBps) / BPS;
-        _checkCollateralBalance(taker.trader, col, notional + buyerFee);
-        _checkTokenBalance(maker.trader, _ct.getTokenId(maker.marketId, maker.outcomeId), fillAmount);
-      }
+      bool makerIsBuyer = maker.side == Side.Buy;
+      address buyer = makerIsBuyer ? maker.trader : taker.trader;
+      address seller = makerIsBuyer ? taker.trader : maker.trader;
+      uint256 buyerFeeBps = makerIsBuyer ? feeConfig.makerFeeBps : feeConfig.takerFeeBps;
+      _checkCollateralBalance(buyer, col, notional + (notional * buyerFeeBps) / BPS);
+      _checkTokenBalance(seller, conditionalTokens.getTokenId(maker.marketId, maker.outcomeId), fillAmount);
     } else if (maker.side == Side.Buy) {
       matchType = 1;
       uint256 makerNotional = (fillAmount * maker.price) / ONE;
