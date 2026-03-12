@@ -250,6 +250,8 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
     }
 
     uint256 priceSum;
+    bytes32[] memory orderHashes = new bytes32[](orders.length);
+    uint256[] memory currentFilled = new uint256[](orders.length);
 
     for (uint256 i = 0; i < orders.length; i++) {
       Order calldata order = orders[i];
@@ -262,8 +264,10 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
       _requireMarketOpen(order.marketId);
       _validateOrder(order, signatures[i]);
 
-      bytes32 orderHash = hashOrder(order);
-      require(filledAmounts[orderHash] + fillAmount <= order.amount, "overfill");
+      bytes32 h = hashOrder(order);
+      orderHashes[i] = h;
+      currentFilled[i] = filledAmounts[h];
+      require(currentFilled[i] + fillAmount <= order.amount, "overfill");
       require(order.minFillAmount == 0 || fillAmount >= order.minFillAmount, "below min fill");
 
       for (uint256 j = 0; j < i; j++) {
@@ -312,10 +316,10 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
       uint256 tokenId = _ct.getTokenId(orders[i].marketId, Outcomes.YES);
       _safeTransferWithGasCap(address(this), orders[i].trader, tokenId, fillAmount);
 
-      bytes32 orderHash = hashOrder(orders[i]);
-      filledAmounts[orderHash] += fillAmount;
+      uint256 newFill = currentFilled[i] + fillAmount;
+      filledAmounts[orderHashes[i]] = newFill;
 
-      emit CrossMarketOrderFilled(orderHash, eventId, orders[i].marketId, fillAmount, filledAmounts[orderHash]);
+      emit CrossMarketOrderFilled(orderHashes[i], eventId, orders[i].marketId, fillAmount, newFill);
     }
 
     // Send surplus (priceSum > ONE overage) + fees to feeModule
@@ -382,14 +386,18 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
     bytes32 makerHash = hashOrder(maker);
     bytes32 takerHash = hashOrder(taker);
 
-    require(filledAmounts[makerHash] + fillAmount <= maker.amount, "maker overfill");
-    require(filledAmounts[takerHash] + fillAmount <= taker.amount, "taker overfill");
+    uint256 makerFilled = filledAmounts[makerHash];
+    uint256 takerFilled = filledAmounts[takerHash];
+    require(makerFilled + fillAmount <= maker.amount, "maker overfill");
+    require(takerFilled + fillAmount <= taker.amount, "taker overfill");
 
     require(maker.minFillAmount == 0 || fillAmount >= maker.minFillAmount, "below maker min fill");
     require(taker.minFillAmount == 0 || fillAmount >= taker.minFillAmount, "below taker min fill");
 
-    filledAmounts[makerHash] += fillAmount;
-    filledAmounts[takerHash] += fillAmount;
+    makerFilled += fillAmount;
+    takerFilled += fillAmount;
+    filledAmounts[makerHash] = makerFilled;
+    filledAmounts[takerHash] = takerFilled;
 
     uint8 matchType;
     if (maker.side != taker.side) {
@@ -411,8 +419,8 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
       maker.marketId,
       matchType,
       fillAmount,
-      filledAmounts[makerHash],
-      filledAmounts[takerHash],
+      makerFilled,
+      takerFilled,
       makerFee,
       takerFee
     );
