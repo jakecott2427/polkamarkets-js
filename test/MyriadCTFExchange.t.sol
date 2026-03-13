@@ -11,6 +11,7 @@ import "../contracts/ConditionalTokens.sol";
 import "../contracts/MyriadCTFExchange.sol";
 import "../contracts/FeeModule.sol";
 import "../contracts/IMyriadMarketManager.sol";
+import "../contracts/Outcomes.sol";
 
 contract MockERC20 is ERC20 {
   constructor() ERC20("Collateral", "COL") {}

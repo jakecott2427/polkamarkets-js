@@ -9,6 +9,7 @@ import "../contracts/AdminRegistry.sol";
 import "../contracts/PredictionMarketV3ManagerCLOB.sol";
 import "../contracts/ConditionalTokens.sol";
 import "../contracts/IMyriadMarketManager.sol";
+import "../contracts/Outcomes.sol";
 
 contract MockERC20 is ERC20 {
   constructor() ERC20("Collateral", "COL") {}
@@ -90,21 +91,21 @@ contract ConditionalTokensTest is Test {
   // =========================================================================
 
   function testGetTokenIdOutcome0() public view {
-    uint256 expected = (marketId << 1) | 0;
-    assertEq(ct.getTokenId(marketId, 0), expected);
+    uint256 expected = (marketId << 1) | Outcomes.YES;
+    assertEq(ct.getTokenId(marketId, Outcomes.YES), expected);
   }
 
   function testGetTokenIdOutcome1() public view {
-    uint256 expected = (marketId << 1) | 1;
-    assertEq(ct.getTokenId(marketId, 1), expected);
+    uint256 expected = (marketId << 1) | Outcomes.NO;
+    assertEq(ct.getTokenId(marketId, Outcomes.NO), expected);
   }
 
   function testGetTokenIdDifferentOutcomesDiffer() public view {
-    assertTrue(ct.getTokenId(marketId, 0) != ct.getTokenId(marketId, 1));
+    assertTrue(ct.getTokenId(marketId, Outcomes.YES) != ct.getTokenId(marketId, Outcomes.NO));
   }
 
   function testGetTokenIdDifferentMarketsDiffer() public view {
-    assertTrue(ct.getTokenId(1, 0) != ct.getTokenId(2, 0));
+    assertTrue(ct.getTokenId(1, Outcomes.YES) != ct.getTokenId(2, Outcomes.YES));
   }
 
   // =========================================================================
@@ -163,7 +164,7 @@ contract ConditionalTokensTest is Test {
   function testSplitPositionResolvedMarketReverts() public {
     // Warp past closesAt, then resolve
     vm.warp(block.timestamp + 2 days);
-    manager.adminResolveMarket(marketId, 0);
+    manager.adminResolveMarket(marketId, int256(Outcomes.YES));
 
     collateral.mint(alice, 100 ether);
     vm.startPrank(alice);
@@ -262,7 +263,7 @@ contract ConditionalTokensTest is Test {
 
     // Resolve with outcome 0 winning
     vm.warp(block.timestamp + 2 days);
-    manager.adminResolveMarket(marketId, 0);
+    manager.adminResolveMarket(marketId, int256(Outcomes.YES));
 
     uint256 before = collateral.balanceOf(alice);
     vm.prank(alice);
@@ -282,7 +283,7 @@ contract ConditionalTokensTest is Test {
 
     // Resolve with outcome 1 winning
     vm.warp(block.timestamp + 2 days);
-    manager.adminResolveMarket(marketId, 1);
+    manager.adminResolveMarket(marketId, int256(Outcomes.NO));
 
     uint256 before = collateral.balanceOf(alice);
     vm.prank(alice);
@@ -303,7 +304,7 @@ contract ConditionalTokensTest is Test {
 
   function testRedeemPositionNoBalanceReverts() public {
     vm.warp(block.timestamp + 2 days);
-    manager.adminResolveMarket(marketId, 0);
+    manager.adminResolveMarket(marketId, int256(Outcomes.YES));
 
     vm.prank(alice);
     vm.expectRevert("no balance");
@@ -316,7 +317,7 @@ contract ConditionalTokensTest is Test {
     _approveAndSplit(alice, amount);
 
     vm.warp(block.timestamp + 2 days);
-    manager.adminResolveMarket(marketId, 0);
+    manager.adminResolveMarket(marketId, int256(Outcomes.YES));
 
     vm.prank(alice);
     ct.redeemPosition(marketId);
@@ -397,7 +398,7 @@ contract ConditionalTokensTest is Test {
 
   function testRedeemVoidedNotVoidedReverts() public {
     vm.warp(block.timestamp + 2 days);
-    manager.adminResolveMarket(marketId, 0);
+    manager.adminResolveMarket(marketId, int256(Outcomes.YES));
 
     vm.prank(alice);
     vm.expectRevert("not voided");
@@ -440,10 +441,10 @@ contract ConditionalTokensTest is Test {
     ct.splitPosition(marketId, amount);
     vm.stopPrank();
 
-    manager.adminResolveMarket(marketId, 0); // outcome 0 wins → outcome 1 is losing
+    manager.adminResolveMarket(marketId, int256(Outcomes.YES)); // outcome 0 wins → outcome 1 is losing
 
-    uint256 winningTokenId = ct.getTokenId(marketId, 0);
-    uint256 losingTokenId  = ct.getTokenId(marketId, 1);
+    uint256 winningTokenId = ct.getTokenId(marketId, Outcomes.YES);
+    uint256 losingTokenId  = ct.getTokenId(marketId, Outcomes.NO);
 
     vm.prank(alice);
     ct.prunePosition(marketId);
@@ -462,10 +463,10 @@ contract ConditionalTokensTest is Test {
     ct.splitPosition(marketId, amount);
     vm.stopPrank();
 
-    manager.adminResolveMarket(marketId, 1); // outcome 1 wins → outcome 0 is losing
+    manager.adminResolveMarket(marketId, int256(Outcomes.NO)); // outcome 1 wins → outcome 0 is losing
 
-    uint256 winningTokenId = ct.getTokenId(marketId, 1);
-    uint256 losingTokenId  = ct.getTokenId(marketId, 0);
+    uint256 winningTokenId = ct.getTokenId(marketId, Outcomes.NO);
+    uint256 losingTokenId  = ct.getTokenId(marketId, Outcomes.YES);
 
     vm.prank(alice);
     ct.prunePosition(marketId);
@@ -483,7 +484,7 @@ contract ConditionalTokensTest is Test {
     ct.splitPosition(marketId, amount);
     vm.stopPrank();
 
-    manager.adminResolveMarket(marketId, 0);
+    manager.adminResolveMarket(marketId, int256(Outcomes.YES));
 
     uint256 colBefore = collateral.balanceOf(alice);
     vm.prank(alice);
@@ -527,7 +528,7 @@ contract ConditionalTokensTest is Test {
 
   function testPrunePositionNoBalanceReverts() public {
     // alice never bought losing tokens
-    manager.adminResolveMarket(marketId, 0);
+    manager.adminResolveMarket(marketId, int256(Outcomes.YES));
 
     vm.prank(alice);
     vm.expectRevert("no losing balance");
@@ -543,7 +544,7 @@ contract ConditionalTokensTest is Test {
     ct.splitPosition(marketId, amount);
     vm.stopPrank();
 
-    manager.adminResolveMarket(marketId, 0);
+    manager.adminResolveMarket(marketId, int256(Outcomes.YES));
 
     vm.prank(alice);
     ct.prunePosition(marketId);
@@ -563,16 +564,16 @@ contract ConditionalTokensTest is Test {
     collateral.approve(address(ct), amount);
     ct.splitPosition(marketId, amount);
     // Transfer the losing token away so alice only holds outcome 0
-    ct.safeTransferFrom(alice, bob, ct.getTokenId(marketId, 1), amount, "");
+    ct.safeTransferFrom(alice, bob, ct.getTokenId(marketId, Outcomes.NO), amount, "");
     vm.stopPrank();
 
-    manager.adminResolveMarket(marketId, 0); // outcome 0 wins
+    manager.adminResolveMarket(marketId, int256(Outcomes.YES)); // outcome 0 wins
 
     // alice holds no losing tokens → should revert, NOT burn her winning tokens
     vm.prank(alice);
     vm.expectRevert("no losing balance");
     ct.prunePosition(marketId);
 
-    assertEq(ct.balanceOf(alice, ct.getTokenId(marketId, 0)), amount);
+    assertEq(ct.balanceOf(alice, ct.getTokenId(marketId, Outcomes.YES)), amount);
   }
 }
