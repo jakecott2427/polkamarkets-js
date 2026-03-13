@@ -106,6 +106,8 @@ contract FeeModule is Initializable, UUPSUpgradeable {
       }
     }
 
+    require(tiers.length == 0 || tiers[tiers.length - 1].maxPrice == ONE, "last tier must cover ONE");
+
     delete _marketFees[marketId];
     for (uint256 i = 0; i < tiers.length; i++) {
       _marketFees[marketId].push(tiers[i]);

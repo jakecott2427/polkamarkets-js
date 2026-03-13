@@ -370,15 +370,11 @@ contract FeeModuleTest is Test {
         assertEq(takerBps, 0);
     }
 
-    function testGetFeesAtPriceAboveAllTiersReturnsZero() public {
+    function testSetMarketFeesLastTierNotOneReverts() public {
         uint256 marketId = 23;
         vm.prank(feeAdmin);
+        vm.expectRevert("last tier must cover ONE");
         feeModule.setMarketFees(marketId, _singleTier(uint128(ONE / 2), 100, 200));
-
-        // price = ONE is above maxPrice (ONE/2), so no tier matches
-        (uint16 makerBps, uint16 takerBps) = feeModule.getFeesAtPrice(marketId, ONE);
-        assertEq(makerBps, 0);
-        assertEq(takerBps, 0);
     }
 
     // =========================================================================

@@ -85,7 +85,11 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
   /// @notice Gas cap for ERC-1155 safeTransferFrom callbacks (EIP-7702 griefing protection).
   uint256 public callbackGasLimit;
 
+  /// @notice Minimum order.amount; also minimum remainder after a partial fill.
+  uint256 public minOrderAmount;
+
   event CallbackGasLimitUpdated(uint256 oldLimit, uint256 newLimit);
+  event MinOrderAmountUpdated(uint256 oldAmount, uint256 newAmount);
   event OrderCancelled(bytes32 indexed orderHash, address indexed trader);
   event OrdersMatched(
     bytes32 makerHash,
@@ -165,6 +169,13 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
     require(_limit >= 50_000, "limit too low");
     emit CallbackGasLimitUpdated(callbackGasLimit, _limit);
     callbackGasLimit = _limit;
+  }
+
+  function setMinOrderAmount(uint256 _amount) external {
+    require(registry.hasRole(registry.DEFAULT_ADMIN_ROLE(), msg.sender), "not admin");
+    uint256 old = minOrderAmount;
+    minOrderAmount = _amount;
+    emit MinOrderAmountUpdated(old, _amount);
   }
 
   // ─── Order management ────────────────────────────────────────────────
@@ -321,6 +332,11 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
       uint256 newFill = currentFilled[i] + fillAmount;
       filledAmounts[orderHashes[i]] = newFill;
 
+      if (minOrderAmount > 0) {
+        uint256 remaining = orders[i].amount - newFill;
+        require(remaining == 0 || remaining >= minOrderAmount, "dust remainder");
+      }
+
       emit CrossMarketOrderFilled(orderHashes[i], eventId, orders[i].marketId, fillAmount, newFill);
     }
 
@@ -428,6 +444,13 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
     filledAmounts[makerHash] = makerFilled;
     filledAmounts[takerHash] = takerFilled;
 
+    if (minOrderAmount > 0) {
+      uint256 makerRemaining = maker.amount - makerFilled;
+      require(makerRemaining == 0 || makerRemaining >= minOrderAmount, "maker dust remainder");
+      uint256 takerRemaining = taker.amount - takerFilled;
+      require(takerRemaining == 0 || takerRemaining >= minOrderAmount, "taker dust remainder");
+    }
+
     if (matchType == 0) {
       (makerFee, takerFee) = _settleDirectMatch(maker, taker, fillAmount, feeConfig);
     } else if (matchType == 1) {
@@ -454,6 +477,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
   function _validateOrder(Order calldata order, bytes calldata signature) internal view {
     require(order.trader != address(0), "trader 0");
     require(order.amount > 0, "amount 0");
+    require(minOrderAmount == 0 || order.amount >= minOrderAmount, "below min amount");
     require(order.expiration == 0 || order.expiration > block.timestamp, "expired");
     require(order.outcomeId < 2, "bad outcome");
 
