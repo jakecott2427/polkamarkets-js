@@ -570,7 +570,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
     );
     if (!success) {
       if (returndata.length > 0) {
-        assembly { revert(add(returndata, 32), mload(returndata)) }
+        assembly ("memory-safe") { revert(add(returndata, 32), mload(returndata)) }
       }
       revert("transfer failed");
     }
