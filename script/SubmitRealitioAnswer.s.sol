@@ -29,8 +29,8 @@ contract SubmitRealitioAnswer is Script {
     RealitioOracle oracle = RealitioOracle(oracleAddr);
     IRealityETH_ERC20 realitio = IRealityETH_ERC20(realitioAddr);
 
-    (bytes32 questionId, bool initialized) = oracle.questions(marketId);
-    require(initialized, "Market oracle not initialized");
+    bytes32 questionId = oracle.questions(marketId);
+    require(questionId != bytes32(0), "Market oracle not initialized");
 
     console.log("Market ID:", marketId);
     console.log("Question ID:");

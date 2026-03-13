@@ -6,6 +6,7 @@ import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "../contracts/oracles/RealitioOracle.sol";
 import "../contracts/IRealityETH_ERC20.sol";
 import "../contracts/IMarketOracle.sol";
+import "../contracts/Outcomes.sol";
 
 // Import the real Reality.eth contract. Its IERC20 differs from OZ, so we
 // use a low-level call for setToken to avoid type conflicts.
@@ -84,8 +85,7 @@ contract RealitioOracleTest is Test {
 
     oracle.initialize(marketId, data);
 
-    (bytes32 questionId, bool initialized) = oracle.questions(marketId);
-    assertTrue(initialized);
+    bytes32 questionId = oracle.questions(marketId);
     assertTrue(questionId != bytes32(0));
   }
 
@@ -140,8 +140,8 @@ contract RealitioOracleTest is Test {
 
     oracle.initialize(marketId, data);
 
-    (, bool initialized) = oracle.questions(marketId);
-    assertTrue(initialized);
+    bytes32 questionId = oracle.questions(marketId);
+    assertTrue(questionId != bytes32(0));
   }
 
   // =========================================================================
@@ -155,7 +155,8 @@ contract RealitioOracleTest is Test {
 
   function testGetResultNotFinalizedReturnsUnresolved() public {
     uint256 marketId = 10;
-    bytes memory data = abi.encode("Q?", arbitrator, TIMEOUT, uint32(block.timestamp + 1 days));
+    uint32 openingTs = uint32(block.timestamp + 100);
+    bytes memory data = abi.encode("Q?", arbitrator, TIMEOUT, openingTs);
     oracle.initialize(marketId, data);
 
     (int256 outcome, bool resolved) = oracle.getResult(marketId);
@@ -163,30 +164,17 @@ contract RealitioOracleTest is Test {
     assertFalse(resolved);
   }
 
-  function testGetResultFinalizedYes() public {
-    uint256 marketId = 11;
-    bytes memory data = abi.encode("Q?", arbitrator, TIMEOUT, uint32(block.timestamp));
+  function _initAndOpen(uint256 marketId) internal returns (bytes32 questionId) {
+    uint32 openingTs = uint32(block.timestamp + 100);
+    bytes memory data = abi.encode("Q?", arbitrator, TIMEOUT, openingTs);
     oracle.initialize(marketId, data);
-
-    (bytes32 questionId, ) = oracle.questions(marketId);
-
-    vm.prank(answerer);
-    realitio.submitAnswerERC20(questionId, bytes32(uint256(0)), 0, 1 ether);
-
-    // Advance past the timeout so the answer finalizes
-    vm.warp(block.timestamp + TIMEOUT + 1);
-
-    (int256 outcome, bool resolved) = oracle.getResult(marketId);
-    assertEq(outcome, 0);
-    assertTrue(resolved);
+    questionId = oracle.questions(marketId);
+    vm.warp(openingTs);
   }
 
-  function testGetResultFinalizedNo() public {
-    uint256 marketId = 12;
-    bytes memory data = abi.encode("Q?", arbitrator, TIMEOUT, uint32(block.timestamp));
-    oracle.initialize(marketId, data);
-
-    (bytes32 questionId, ) = oracle.questions(marketId);
+  function testGetResultFinalizedYes() public {
+    uint256 marketId = 11;
+    bytes32 questionId = _initAndOpen(marketId);
 
     vm.prank(answerer);
     realitio.submitAnswerERC20(questionId, bytes32(uint256(1)), 0, 1 ether);
@@ -194,21 +182,31 @@ contract RealitioOracleTest is Test {
     vm.warp(block.timestamp + TIMEOUT + 1);
 
     (int256 outcome, bool resolved) = oracle.getResult(marketId);
-    assertEq(outcome, 1);
+    assertEq(outcome, int256(Outcomes.YES));
+    assertTrue(resolved);
+  }
+
+  function testGetResultFinalizedNo() public {
+    uint256 marketId = 12;
+    bytes32 questionId = _initAndOpen(marketId);
+
+    vm.prank(answerer);
+    realitio.submitAnswerERC20(questionId, bytes32(uint256(0)), 0, 1 ether);
+
+    vm.warp(block.timestamp + TIMEOUT + 1);
+
+    (int256 outcome, bool resolved) = oracle.getResult(marketId);
+    assertEq(outcome, int256(Outcomes.NO));
     assertTrue(resolved);
   }
 
   function testGetResultNotFinalizedBeforeTimeout() public {
     uint256 marketId = 13;
-    bytes memory data = abi.encode("Q?", arbitrator, TIMEOUT, uint32(block.timestamp));
-    oracle.initialize(marketId, data);
-
-    (bytes32 questionId, ) = oracle.questions(marketId);
+    bytes32 questionId = _initAndOpen(marketId);
 
     vm.prank(answerer);
-    realitio.submitAnswerERC20(questionId, bytes32(uint256(0)), 0, 1 ether);
+    realitio.submitAnswerERC20(questionId, bytes32(uint256(1)), 0, 1 ether);
 
-    // Advance but NOT past the timeout
     vm.warp(block.timestamp + TIMEOUT - 1);
 
     (int256 outcome, bool resolved) = oracle.getResult(marketId);
@@ -218,42 +216,55 @@ contract RealitioOracleTest is Test {
 
   function testGetResultAnswerOverridden() public {
     uint256 marketId = 14;
-    bytes memory data = abi.encode("Q?", arbitrator, TIMEOUT, uint32(block.timestamp));
-    oracle.initialize(marketId, data);
+    bytes32 questionId = _initAndOpen(marketId);
 
-    (bytes32 questionId, ) = oracle.questions(marketId);
-
-    // First answer: YES (0) with 1 ether bond
     vm.prank(answerer);
-    realitio.submitAnswerERC20(questionId, bytes32(uint256(0)), 0, 1 ether);
+    realitio.submitAnswerERC20(questionId, bytes32(uint256(1)), 0, 1 ether);
 
-    // Second answer: NO (1) with doubled bond (must be >= 2x previous)
     vm.prank(answerer);
-    realitio.submitAnswerERC20(questionId, bytes32(uint256(1)), 0, 2 ether);
+    realitio.submitAnswerERC20(questionId, bytes32(uint256(0)), 0, 2 ether);
 
     vm.warp(block.timestamp + TIMEOUT + 1);
 
     (int256 outcome, bool resolved) = oracle.getResult(marketId);
-    assertEq(outcome, 1, "overridden to NO");
+    assertEq(outcome, int256(Outcomes.NO), "overridden to NO");
     assertTrue(resolved);
   }
 
-  function testGetResultInvalidAnswer() public {
+  function testGetResultInvalidAnswerReturnsVoided() public {
     uint256 marketId = 15;
-    bytes memory data = abi.encode("Q?", arbitrator, TIMEOUT, uint32(block.timestamp));
-    oracle.initialize(marketId, data);
+    bytes32 questionId = _initAndOpen(marketId);
 
-    (bytes32 questionId, ) = oracle.questions(marketId);
-
-    // Reality.eth uses type(uint256).max for "invalid"
     vm.prank(answerer);
     realitio.submitAnswerERC20(questionId, bytes32(type(uint256).max), 0, 1 ether);
 
     vm.warp(block.timestamp + TIMEOUT + 1);
 
     (int256 outcome, bool resolved) = oracle.getResult(marketId);
-    assertEq(outcome, int256(uint256(type(uint256).max)));
+    assertEq(outcome, Outcomes.VOIDED);
     assertTrue(resolved);
+  }
+
+  function testGetResultNonBinaryAnswerReturnsVoided() public {
+    uint256 marketId = 16;
+    bytes32 questionId = _initAndOpen(marketId);
+
+    vm.prank(answerer);
+    realitio.submitAnswerERC20(questionId, bytes32(uint256(42)), 0, 1 ether);
+
+    vm.warp(block.timestamp + TIMEOUT + 1);
+
+    (int256 outcome, bool resolved) = oracle.getResult(marketId);
+    assertEq(outcome, Outcomes.VOIDED);
+    assertTrue(resolved);
+  }
+
+  function testInitializeClosesAtInPastReverts() public {
+    uint256 marketId = 17;
+    bytes memory data = abi.encode("Q?", arbitrator, TIMEOUT, uint32(block.timestamp - 1));
+
+    vm.expectRevert("closesAt in past");
+    oracle.initialize(marketId, data);
   }
 
   // =========================================================================
@@ -261,24 +272,27 @@ contract RealitioOracleTest is Test {
   // =========================================================================
 
   function testMultipleMarketsIndependent() public {
-    bytes memory data1 = abi.encode("Market1?", arbitrator, TIMEOUT, uint32(block.timestamp));
-    bytes memory data2 = abi.encode("Market2?", arbitrator, TIMEOUT, uint32(block.timestamp));
+    uint32 openingTs = uint32(block.timestamp + 100);
+    bytes memory data1 = abi.encode("Market1?", arbitrator, TIMEOUT, openingTs);
+    bytes memory data2 = abi.encode("Market2?", arbitrator, TIMEOUT, openingTs);
 
     oracle.initialize(1, data1);
     oracle.initialize(2, data2);
 
-    (bytes32 qid1, ) = oracle.questions(1);
-    (bytes32 qid2, ) = oracle.questions(2);
+    bytes32 qid1 = oracle.questions(1);
+    bytes32 qid2 = oracle.questions(2);
     assertTrue(qid1 != qid2, "different questions");
 
-    // Only finalize market 1
+    vm.warp(openingTs);
+
+    // Only finalize market 1 -- Realitio 1 (yes) → Outcomes.YES (0)
     vm.prank(answerer);
-    realitio.submitAnswerERC20(qid1, bytes32(uint256(0)), 0, 1 ether);
+    realitio.submitAnswerERC20(qid1, bytes32(uint256(1)), 0, 1 ether);
     vm.warp(block.timestamp + TIMEOUT + 1);
 
     (int256 outcome1, bool resolved1) = oracle.getResult(1);
     assertTrue(resolved1);
-    assertEq(outcome1, 0);
+    assertEq(outcome1, int256(Outcomes.YES));
 
     (, bool resolved2) = oracle.getResult(2);
     assertFalse(resolved2);

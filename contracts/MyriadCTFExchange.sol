@@ -230,6 +230,9 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
   ///         Each maker can have a different price (and therefore different fees).
   ///         The taker is validated once; its filledAmounts is incremented by the
   ///         sum of all individual fills. One OrdersMatched event per maker fill.
+  /// @dev    Unlike matchOrdersWithFees where taker.minFillAmount constrains each
+  ///         individual fill, here it constrains the aggregate across all makers.
+  ///         Individual fills may be below minFillAmount if their sum satisfies it.
   function matchMultipleOrdersWithFees(
     Order[] calldata makers,
     bytes[] calldata makerSigs,
@@ -246,6 +249,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
     _validateOrder(taker, takerSig);
     bytes32 takerHash = hashOrder(taker);
 
+    IFeeModule _feeModule = IFeeModule(feeModule);
     uint256 totalTakerFill;
     uint256 totalFees;
     uint256 takerFilledBefore = filledAmounts[takerHash];
@@ -256,10 +260,10 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
       FeeConfig memory feeConfig;
       if (makers[i].side != taker.side) {
         (feeConfig.makerFeeBps, feeConfig.takerFeeBps) =
-          IFeeModule(feeModule).getFeesAtPrice(makers[i].marketId, makers[i].price);
+          _feeModule.getFeesAtPrice(makers[i].marketId, makers[i].price);
       } else {
-        (feeConfig.makerFeeBps, ) = IFeeModule(feeModule).getFeesAtPrice(makers[i].marketId, makers[i].price);
-        (, feeConfig.takerFeeBps) = IFeeModule(feeModule).getFeesAtPrice(makers[i].marketId, taker.price);
+        (feeConfig.makerFeeBps, ) = _feeModule.getFeesAtPrice(makers[i].marketId, makers[i].price);
+        (, feeConfig.takerFeeBps) = _feeModule.getFeesAtPrice(makers[i].marketId, taker.price);
       }
 
       totalTakerFill += fillAmounts[i];
@@ -271,13 +275,19 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
       totalFees += makerFee + takerFee;
     }
 
-    require(takerFilledBefore + totalTakerFill <= taker.amount, "taker overfill");
+    uint256 takerFilledAfter = takerFilledBefore + totalTakerFill;
+    require(takerFilledAfter <= taker.amount, "taker overfill");
     require(taker.minFillAmount == 0 || totalTakerFill >= taker.minFillAmount, "below taker min fill");
-    filledAmounts[takerHash] = takerFilledBefore + totalTakerFill;
+    filledAmounts[takerHash] = takerFilledAfter;
+
+    if (minOrderAmount > 0) {
+      uint256 takerRemaining = taker.amount - takerFilledAfter;
+      require(takerRemaining == 0 || takerRemaining >= minOrderAmount, "taker dust remainder");
+    }
 
     if (totalFees > 0) {
       address token = address(manager.getMarketCollateral(taker.marketId));
-      IFeeModule(feeModule).accrueFees(token, totalFees);
+      _feeModule.accrueFees(token, totalFees);
     }
   }
 
@@ -552,20 +562,48 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
 
     bytes32 makerHash = hashOrder(maker);
 
-    require(filledAmounts[makerHash] + fillAmount <= maker.amount, "maker overfill");
+    uint256 makerFilled = filledAmounts[makerHash];
+    require(makerFilled + fillAmount <= maker.amount, "maker overfill");
     require(maker.minFillAmount == 0 || fillAmount >= maker.minFillAmount, "below maker min fill");
-
-    filledAmounts[makerHash] += fillAmount;
 
     uint8 matchType;
     if (maker.side != taker.side) {
-      matchType = 0; // direct
-      (makerFee, takerFee) = _settleDirectMatch(maker, taker, fillAmount, feeConfig);
+      matchType = 0;
+      uint256 notional = (fillAmount * maker.price) / ONE;
+      IERC20 col = manager.getMarketCollateral(maker.marketId);
+      bool makerIsBuyer = maker.side == Side.Buy;
+      address buyer = makerIsBuyer ? maker.trader : taker.trader;
+      address seller = makerIsBuyer ? taker.trader : maker.trader;
+      uint256 buyerFeeBps = makerIsBuyer ? feeConfig.makerFeeBps : feeConfig.takerFeeBps;
+      _checkCollateralBalance(buyer, col, notional + (notional * buyerFeeBps) / BPS);
+      _checkTokenBalance(seller, conditionalTokens.getTokenId(maker.marketId, maker.outcomeId), fillAmount);
     } else if (maker.side == Side.Buy) {
-      matchType = 1; // mint
+      matchType = 1;
+      uint256 makerNotional = (fillAmount * maker.price) / ONE;
+      uint256 takerNotional = fillAmount - makerNotional;
+      IERC20 col = manager.getMarketCollateral(maker.marketId);
+      _checkCollateralBalance(maker.trader, col, makerNotional + (makerNotional * feeConfig.makerFeeBps) / BPS);
+      _checkCollateralBalance(taker.trader, col, takerNotional + (takerNotional * feeConfig.takerFeeBps) / BPS);
+    } else {
+      matchType = 2;
+      ConditionalTokens _ct = conditionalTokens;
+      _checkTokenBalance(maker.trader, _ct.getTokenId(maker.marketId, maker.outcomeId), fillAmount);
+      _checkTokenBalance(taker.trader, _ct.getTokenId(taker.marketId, taker.outcomeId), fillAmount);
+    }
+
+    makerFilled += fillAmount;
+    filledAmounts[makerHash] = makerFilled;
+
+    if (minOrderAmount > 0) {
+      uint256 makerRemaining = maker.amount - makerFilled;
+      require(makerRemaining == 0 || makerRemaining >= minOrderAmount, "maker dust remainder");
+    }
+
+    if (matchType == 0) {
+      (makerFee, takerFee) = _settleDirectMatch(maker, taker, fillAmount, feeConfig);
+    } else if (matchType == 1) {
       (makerFee, takerFee) = _settleMintMatch(maker, taker, fillAmount, feeConfig);
     } else {
-      matchType = 2; // merge
       (makerFee, takerFee) = _settleMergeMatch(maker, taker, fillAmount, feeConfig);
     }
 
@@ -577,7 +615,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
       maker.marketId,
       matchType,
       fillAmount,
-      filledAmounts[makerHash],
+      makerFilled,
       takerCumulativeFill,
       makerFee,
       takerFee
