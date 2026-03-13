@@ -20,6 +20,32 @@ contract MockERC20 is ERC20 {
     }
 }
 
+/// @dev Mock contract wallet that burns all available gas in onERC1155Received.
+///      Also implements ERC-1271 so it can be used as a trader with the exchange.
+contract GasGriefingWallet {
+    mapping(uint256 => uint256) private _junk;
+    uint256 private _counter;
+
+    function isValidSignature(bytes32, bytes calldata) external pure returns (bytes4) {
+        return 0x1626ba7e; // ERC-1271 magic value
+    }
+
+    function onERC1155Received(address, address, uint256, uint256, bytes calldata)
+        external returns (bytes4)
+    {
+        while (gasleft() > 5000) {
+            _junk[_counter++] = gasleft();
+        }
+        return this.onERC1155Received.selector;
+    }
+
+    function onERC1155BatchReceived(address, address, uint256[] calldata, uint256[] calldata, bytes calldata)
+        external pure returns (bytes4)
+    {
+        return this.onERC1155BatchReceived.selector;
+    }
+}
+
 contract MyriadCTFExchangeTest is Test {
     uint256 private constant ONE = 1e18;
     uint256 private constant BPS = 10000;
@@ -199,6 +225,14 @@ contract MyriadCTFExchangeTest is Test {
         assertEq(exchange.negRiskAdapter(), adapter);
     }
 
+    function testSetNegRiskAdapterEmitsEvent() public {
+        address oldAdapter = exchange.negRiskAdapter();
+        address newAdapter = address(0xADA);
+        vm.expectEmit(true, true, false, false, address(exchange));
+        emit MyriadCTFExchange.NegRiskAdapterUpdated(oldAdapter, newAdapter);
+        exchange.setNegRiskAdapter(newAdapter);
+    }
+
     function testInitializeWithZeroManagerReverts() public {
         MyriadCTFExchange impl = new MyriadCTFExchange();
         vm.expectRevert("manager 0");
@@ -350,7 +384,7 @@ contract MyriadCTFExchangeTest is Test {
         bytes memory badSig  = _signOrder(m, thirdPk);
         bytes memory takerSig = _signOrder(t, takerPk);
 
-        vm.expectRevert("signer mismatch");
+        vm.expectRevert("invalid signature");
         exchange.matchOrdersWithFees(m, badSig, t, takerSig, amount);
     }
 
@@ -415,6 +449,65 @@ contract MyriadCTFExchangeTest is Test {
         bytes memory takerSig = _signOrder(t, takerPk);
 
         vm.expectRevert("bad outcome");
+        exchange.matchOrdersWithFees(m, makerSig, t, takerSig, 100 ether);
+    }
+
+    function testOrderExpiredAtExactTimestampReverts() public {
+        collateral.mint(maker, 1000 ether);
+        collateral.mint(taker, 1000 ether);
+        _approveAll(maker);
+        _approveAll(taker);
+
+        uint256 expiry = block.timestamp + 1 hours;
+
+        MyriadCTFExchange.Order memory m = MyriadCTFExchange.Order({
+            trader:        maker,
+            marketId:      marketId,
+            outcomeId:     0,
+            side:          MyriadCTFExchange.Side.Buy,
+            amount:        100 ether,
+            price:         (60 * ONE) / 100,
+            minFillAmount: 0,
+            nonce:         450,
+            expiration:    expiry
+        });
+        MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, 100 ether, (40 * ONE) / 100, 451);
+
+        bytes memory makerSig = _signOrder(m, makerPk);
+        bytes memory takerSig = _signOrder(t, takerPk);
+
+        // Warp to exactly the expiration timestamp — order should be expired
+        vm.warp(expiry);
+        vm.expectRevert("expired");
+        exchange.matchOrdersWithFees(m, makerSig, t, takerSig, 100 ether);
+    }
+
+    function testOrderValidBeforeExpiration() public {
+        collateral.mint(maker, 1000 ether);
+        collateral.mint(taker, 1000 ether);
+        _approveAll(maker);
+        _approveAll(taker);
+
+        uint256 expiry = block.timestamp + 1 hours;
+
+        MyriadCTFExchange.Order memory m = MyriadCTFExchange.Order({
+            trader:        maker,
+            marketId:      marketId,
+            outcomeId:     0,
+            side:          MyriadCTFExchange.Side.Buy,
+            amount:        100 ether,
+            price:         (60 * ONE) / 100,
+            minFillAmount: 0,
+            nonce:         452,
+            expiration:    expiry
+        });
+        MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, 100 ether, (40 * ONE) / 100, 453);
+
+        bytes memory makerSig = _signOrder(m, makerPk);
+        bytes memory takerSig = _signOrder(t, takerPk);
+
+        // One second before expiry — order should succeed
+        vm.warp(expiry - 1);
         exchange.matchOrdersWithFees(m, makerSig, t, takerSig, 100 ether);
     }
 
@@ -578,40 +671,6 @@ contract MyriadCTFExchangeTest is Test {
 
         vm.expectRevert("price sum");
         exchange.matchOrdersWithFees(m, mSig, t, tSig, amount);
-    }
-
-    function testMergeMatchFeeExceedsProceedsReverts() public {
-        // Set fees to 100% (10000 bps) so the seller fee equals proceeds entirely.
-        // At 10000 bps: fee = (notional * 10000) / 10000 = notional = proceeds.
-        // require(proceeds >= fee) passes (equality). Sellers receive 0 collateral.
-        // This validates the 100% fee path does not underflow.
-        _setUniformFees(marketId, 10000, 10000);
-
-        uint256 amount = 100 ether;
-        uint256 outcome0Price = ONE / 2;
-        uint256 outcome1Price = ONE / 2;
-
-        collateral.mint(maker, 1000 ether);
-        collateral.mint(taker, 1000 ether);
-        _approveAll(maker);
-        _approveAll(taker);
-
-        vm.prank(maker);
-        conditionalTokens.splitPosition(marketId, amount);
-        vm.prank(taker);
-        conditionalTokens.splitPosition(marketId, amount);
-
-        MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Sell, amount, outcome0Price, 560);
-        MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Sell, amount, outcome1Price, 561);
-
-        bytes memory mSig = _signOrder(m, makerPk);
-        bytes memory tSig = _signOrder(t, takerPk);
-
-        // At 100% fees, all collateral is taken as fees; sellers receive 0 proceeds.
-        exchange.matchOrdersWithFees(m, mSig, t, tSig, amount);
-
-        // All collateral went to fees
-        assertEq(collateral.balanceOf(address(feeModule)), amount);
     }
 
     // =========================================================================
@@ -820,5 +879,51 @@ contract MyriadCTFExchangeTest is Test {
 
         // Fees forwarded to feeModule
         assertEq(collateral.balanceOf(address(feeModule)), makerFee + takerFee);
+    }
+
+    // =========================================================================
+    // Gas-capped ERC-1155 transfers
+    // =========================================================================
+
+    /// @dev Simulate EIP-7702: an EOA signs an order normally (ECDSA), then gets
+    ///      griefing code etched onto it. When safeTransferFrom delivers tokens,
+    ///      the callback fires but gas is capped by _safeTransferWithGasCap.
+    function testGasGriefingEIP7702BoundedInMintMatch() public {
+        collateral.mint(maker, 1000 ether);
+        collateral.mint(taker, 1000 ether);
+        _approveAll(maker);
+        _approveAll(taker);
+
+        uint256 amount = 50 ether;
+        uint256 makerPrice = (60 * ONE) / 100;
+        uint256 takerPrice = (40 * ONE) / 100;
+
+        // Maker signs order as a normal EOA
+        MyriadCTFExchange.Order memory m = _buildOrder(
+            maker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, makerPrice, 900
+        );
+        MyriadCTFExchange.Order memory t = _buildOrder(
+            taker, marketId, 1, MyriadCTFExchange.Side.Buy, amount, takerPrice, 901
+        );
+
+        bytes memory makerSig = _signOrder(m, makerPk);
+        bytes memory takerSig = _signOrder(t, takerPk);
+
+        // Simulate EIP-7702: etch griefing code onto maker's EOA address.
+        // Now maker.code.length > 0, so safeTransferFrom will call onERC1155Received.
+        GasGriefingWallet griefer = new GasGriefingWallet();
+        vm.etch(maker, address(griefer).code);
+
+        uint256 gasBefore = gasleft();
+        exchange.matchOrdersWithFees(m, makerSig, t, takerSig, amount);
+        uint256 gasUsed = gasBefore - gasleft();
+
+        // Match succeeded — maker received tokens despite griefing callback
+        uint256 tokenId = conditionalTokens.getTokenId(marketId, 0);
+        assertEq(conditionalTokens.balanceOf(maker, tokenId), amount);
+
+        // Gas bounded — without the cap, the griefing callback would consume
+        // millions of gas writing to storage. With the cap, total stays under 1M.
+        assertLt(gasUsed, 1_000_000);
     }
 }

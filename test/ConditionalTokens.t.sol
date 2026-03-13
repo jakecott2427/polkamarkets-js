@@ -137,6 +137,17 @@ contract ConditionalTokensTest is Test {
         ct.splitPosition(marketId, 0);
     }
 
+    function testSplitPositionPausedMarketReverts() public {
+        collateral.mint(alice, 100 ether);
+        manager.pauseMarket(marketId, true);
+
+        vm.startPrank(alice);
+        collateral.approve(address(ct), type(uint256).max);
+        vm.expectRevert("market paused");
+        ct.splitPosition(marketId, 100 ether);
+        vm.stopPrank();
+    }
+
     function testSplitPositionClosedMarketReverts() public {
         // Warp past closesAt so market transitions to closed
         vm.warp(block.timestamp + 2 days);
@@ -506,6 +517,7 @@ contract ConditionalTokensTest is Test {
         vm.stopPrank();
 
         // Voided market — both tokens carry partial value; burning is not allowed
+        vm.warp(block.timestamp + 2 days);
         manager.adminVoidMarket(marketId, ONE / 2, ONE / 2);
 
         vm.prank(alice);
