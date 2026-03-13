@@ -816,9 +816,9 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     uint256 price2 = (20 * ONE) / 100;
 
     MyriadCTFExchange.Order[] memory orders = new MyriadCTFExchange.Order[](3);
-    orders[0] = _buildOrder(alice, marketIds[0], 0, MyriadCTFExchange.Side.Buy, 100 ether, price0, 1);
-    orders[1] = _buildOrder(bob, marketIds[1], 0, MyriadCTFExchange.Side.Buy, 100 ether, price1, 2);
-    orders[2] = _buildOrder(charlie, marketIds[2], 0, MyriadCTFExchange.Side.Buy, 100 ether, price2, 3);
+    orders[0] = _buildOrder(alice, marketIds[0], Outcomes.YES, MyriadCTFExchange.Side.Buy, 100 ether, price0, 1);
+    orders[1] = _buildOrder(bob, marketIds[1], Outcomes.YES, MyriadCTFExchange.Side.Buy, 100 ether, price1, 2);
+    orders[2] = _buildOrder(charlie, marketIds[2], Outcomes.YES, MyriadCTFExchange.Side.Buy, 100 ether, price2, 3);
 
     bytes[] memory sigs = new bytes[](3);
     sigs[0] = _signOrder(orders[0], alicePk);
@@ -852,9 +852,9 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     uint256 price2 = (20 * ONE) / 100;
 
     MyriadCTFExchange.Order[] memory orders = new MyriadCTFExchange.Order[](3);
-    orders[0] = _buildOrder(alice, marketIds[0], 0, MyriadCTFExchange.Side.Buy, 100 ether, price0, 1);
-    orders[1] = _buildOrder(bob, marketIds[1], 0, MyriadCTFExchange.Side.Buy, 100 ether, price1, 2);
-    orders[2] = _buildOrder(charlie, marketIds[2], 0, MyriadCTFExchange.Side.Buy, 100 ether, price2, 3);
+    orders[0] = _buildOrder(alice, marketIds[0], Outcomes.YES, MyriadCTFExchange.Side.Buy, 100 ether, price0, 1);
+    orders[1] = _buildOrder(bob, marketIds[1], Outcomes.YES, MyriadCTFExchange.Side.Buy, 100 ether, price1, 2);
+    orders[2] = _buildOrder(charlie, marketIds[2], Outcomes.YES, MyriadCTFExchange.Side.Buy, 100 ether, price2, 3);
 
     bytes[] memory sigs = new bytes[](3);
     sigs[0] = _signOrder(orders[0], alicePk);
@@ -880,9 +880,9 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     uint256 price2 = (20 * ONE) / 100;
 
     MyriadCTFExchange.Order[] memory orders = new MyriadCTFExchange.Order[](3);
-    orders[0] = _buildOrder(alice, marketIds[0], 0, MyriadCTFExchange.Side.Buy, 5 ether, price0, 1);
-    orders[1] = _buildOrder(bob, marketIds[1], 0, MyriadCTFExchange.Side.Buy, 5 ether, price1, 2);
-    orders[2] = _buildOrder(charlie, marketIds[2], 0, MyriadCTFExchange.Side.Buy, 5 ether, price2, 3);
+    orders[0] = _buildOrder(alice, marketIds[0], Outcomes.YES, MyriadCTFExchange.Side.Buy, 5 ether, price0, 1);
+    orders[1] = _buildOrder(bob, marketIds[1], Outcomes.YES, MyriadCTFExchange.Side.Buy, 5 ether, price1, 2);
+    orders[2] = _buildOrder(charlie, marketIds[2], Outcomes.YES, MyriadCTFExchange.Side.Buy, 5 ether, price2, 3);
 
     bytes[] memory sigs = new bytes[](3);
     sigs[0] = _signOrder(orders[0], alicePk);
@@ -917,9 +917,9 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
 
     // alice has 25 ether order, fill 20 => remaining 5 < minOrderAmount(10)
     MyriadCTFExchange.Order[] memory orders = new MyriadCTFExchange.Order[](3);
-    orders[0] = _buildOrder(alice, marketIds[0], 0, MyriadCTFExchange.Side.Buy, 25 ether, price0, 1);
-    orders[1] = _buildOrder(bob, marketIds[1], 0, MyriadCTFExchange.Side.Buy, 20 ether, price1, 2);
-    orders[2] = _buildOrder(charlie, marketIds[2], 0, MyriadCTFExchange.Side.Buy, 20 ether, price2, 3);
+    orders[0] = _buildOrder(alice, marketIds[0], Outcomes.YES, MyriadCTFExchange.Side.Buy, 25 ether, price0, 1);
+    orders[1] = _buildOrder(bob, marketIds[1], Outcomes.YES, MyriadCTFExchange.Side.Buy, 20 ether, price1, 2);
+    orders[2] = _buildOrder(charlie, marketIds[2], Outcomes.YES, MyriadCTFExchange.Side.Buy, 20 ether, price2, 3);
 
     bytes[] memory sigs = new bytes[](3);
     sigs[0] = _signOrder(orders[0], alicePk);
@@ -954,9 +954,9 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
 
     // alice has 30 ether order, fill 20 => remaining 10 == minOrderAmount
     MyriadCTFExchange.Order[] memory orders = new MyriadCTFExchange.Order[](3);
-    orders[0] = _buildOrder(alice, marketIds[0], 0, MyriadCTFExchange.Side.Buy, 30 ether, price0, 1);
-    orders[1] = _buildOrder(bob, marketIds[1], 0, MyriadCTFExchange.Side.Buy, 20 ether, price1, 2);
-    orders[2] = _buildOrder(charlie, marketIds[2], 0, MyriadCTFExchange.Side.Buy, 20 ether, price2, 3);
+    orders[0] = _buildOrder(alice, marketIds[0], Outcomes.YES, MyriadCTFExchange.Side.Buy, 30 ether, price0, 1);
+    orders[1] = _buildOrder(bob, marketIds[1], Outcomes.YES, MyriadCTFExchange.Side.Buy, 20 ether, price1, 2);
+    orders[2] = _buildOrder(charlie, marketIds[2], Outcomes.YES, MyriadCTFExchange.Side.Buy, 20 ether, price2, 3);
 
     bytes[] memory sigs = new bytes[](3);
     sigs[0] = _signOrder(orders[0], alicePk);
