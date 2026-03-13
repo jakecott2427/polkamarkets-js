@@ -85,7 +85,11 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
   /// @notice Gas cap for ERC-1155 safeTransferFrom callbacks (EIP-7702 griefing protection).
   uint256 public callbackGasLimit;
 
+  /// @notice Minimum order.amount; also minimum remainder after a partial fill.
+  uint256 public minOrderAmount;
+
   event CallbackGasLimitUpdated(uint256 oldLimit, uint256 newLimit);
+  event MinOrderAmountUpdated(uint256 oldAmount, uint256 newAmount);
   event OrderCancelled(bytes32 indexed orderHash, address indexed trader);
   event OrdersMatched(
     bytes32 makerHash,
@@ -165,6 +169,13 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
     require(_limit >= 50_000, "limit too low");
     emit CallbackGasLimitUpdated(callbackGasLimit, _limit);
     callbackGasLimit = _limit;
+  }
+
+  function setMinOrderAmount(uint256 _amount) external {
+    require(registry.hasRole(registry.DEFAULT_ADMIN_ROLE(), msg.sender), "not admin");
+    uint256 old = minOrderAmount;
+    minOrderAmount = _amount;
+    emit MinOrderAmountUpdated(old, _amount);
   }
 
   // ─── Order management ────────────────────────────────────────────────
@@ -359,7 +370,9 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
       }
       totalFees += fee;
 
-      collateral.safeTransferFrom(orders[i].trader, address(this), notional + fee);
+      uint256 required = notional + fee;
+      _checkCollateralBalance(orders[i].trader, collateral, required);
+      collateral.safeTransferFrom(orders[i].trader, address(this), required);
     }
 
     // Mint full fillAmount shares
@@ -373,6 +386,11 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
 
       uint256 newFill = currentFilled[i] + fillAmount;
       filledAmounts[orderHashes[i]] = newFill;
+
+      if (minOrderAmount > 0) {
+        uint256 remaining = orders[i].amount - newFill;
+        require(remaining == 0 || remaining >= minOrderAmount, "dust remainder");
+      }
 
       emit CrossMarketOrderFilled(orderHashes[i], eventId, orders[i].marketId, fillAmount, newFill);
     }
@@ -449,20 +467,50 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
     require(maker.minFillAmount == 0 || fillAmount >= maker.minFillAmount, "below maker min fill");
     require(taker.minFillAmount == 0 || fillAmount >= taker.minFillAmount, "below taker min fill");
 
+    // Early balance checks -- revert cheaply before SSTORE writes if a trader
+    // has moved funds away (front-run griefing protection).
+    uint8 matchType;
+    if (maker.side != taker.side) {
+      matchType = 0;
+      uint256 notional = (fillAmount * maker.price) / ONE;
+      IERC20 col = manager.getMarketCollateral(maker.marketId);
+      bool makerIsBuyer = maker.side == Side.Buy;
+      address buyer = makerIsBuyer ? maker.trader : taker.trader;
+      address seller = makerIsBuyer ? taker.trader : maker.trader;
+      uint256 buyerFeeBps = makerIsBuyer ? feeConfig.makerFeeBps : feeConfig.takerFeeBps;
+      _checkCollateralBalance(buyer, col, notional + (notional * buyerFeeBps) / BPS);
+      _checkTokenBalance(seller, conditionalTokens.getTokenId(maker.marketId, maker.outcomeId), fillAmount);
+    } else if (maker.side == Side.Buy) {
+      matchType = 1;
+      uint256 makerNotional = (fillAmount * maker.price) / ONE;
+      uint256 takerNotional = fillAmount - makerNotional;
+      IERC20 col = manager.getMarketCollateral(maker.marketId);
+      _checkCollateralBalance(maker.trader, col, makerNotional + (makerNotional * feeConfig.makerFeeBps) / BPS);
+      _checkCollateralBalance(taker.trader, col, takerNotional + (takerNotional * feeConfig.takerFeeBps) / BPS);
+    } else {
+      matchType = 2;
+      ConditionalTokens _ct = conditionalTokens;
+      _checkTokenBalance(maker.trader, _ct.getTokenId(maker.marketId, maker.outcomeId), fillAmount);
+      _checkTokenBalance(taker.trader, _ct.getTokenId(taker.marketId, taker.outcomeId), fillAmount);
+    }
+
     makerFilled += fillAmount;
     takerFilled += fillAmount;
     filledAmounts[makerHash] = makerFilled;
     filledAmounts[takerHash] = takerFilled;
 
-    uint8 matchType;
-    if (maker.side != taker.side) {
-      matchType = 0; // direct
+    if (minOrderAmount > 0) {
+      uint256 makerRemaining = maker.amount - makerFilled;
+      require(makerRemaining == 0 || makerRemaining >= minOrderAmount, "maker dust remainder");
+      uint256 takerRemaining = taker.amount - takerFilled;
+      require(takerRemaining == 0 || takerRemaining >= minOrderAmount, "taker dust remainder");
+    }
+
+    if (matchType == 0) {
       (makerFee, takerFee) = _settleDirectMatch(maker, taker, fillAmount, feeConfig);
-    } else if (maker.side == Side.Buy) {
-      matchType = 1; // mint
+    } else if (matchType == 1) {
       (makerFee, takerFee) = _settleMintMatch(maker, taker, fillAmount, feeConfig);
     } else {
-      matchType = 2; // merge
       (makerFee, takerFee) = _settleMergeMatch(maker, taker, fillAmount, feeConfig);
     }
 
@@ -539,6 +587,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
   function _validateOrder(Order calldata order, bytes calldata signature) internal view {
     require(order.trader != address(0), "trader 0");
     require(order.amount > 0, "amount 0");
+    require(minOrderAmount == 0 || order.amount >= minOrderAmount, "below min amount");
     require(order.expiration == 0 || order.expiration > block.timestamp, "expired");
     require(order.outcomeId < 2, "bad outcome");
 
@@ -757,6 +806,26 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
     if (totalProtocolFees > 0) {
       collateral.safeTransfer(feeModule, totalProtocolFees);
     }
+  }
+
+  /// @dev Early balance + allowance check so a front-runner who moves funds
+  ///      causes a cheap revert before expensive SSTORE / settlement work.
+  function _checkCollateralBalance(
+    address trader,
+    IERC20 collateral,
+    uint256 required
+  ) internal view {
+    require(collateral.balanceOf(trader) >= required, "insufficient collateral");
+    require(collateral.allowance(trader, address(this)) >= required, "insufficient allowance");
+  }
+
+  function _checkTokenBalance(
+    address trader,
+    uint256 tokenId,
+    uint256 required
+  ) internal view {
+    require(conditionalTokens.balanceOf(trader, tokenId) >= required, "insufficient tokens");
+    require(conditionalTokens.isApprovedForAll(trader, address(this)), "tokens not approved");
   }
 
   function _requireMarketOpen(uint256 marketId) internal view {

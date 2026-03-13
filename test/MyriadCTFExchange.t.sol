@@ -597,6 +597,11 @@ contract MyriadCTFExchangeTest is Test {
     _approveAll(maker);
     _approveAll(taker);
 
+    vm.startPrank(taker);
+    collateral.approve(address(conditionalTokens), type(uint256).max);
+    conditionalTokens.splitPosition(marketId, amount);
+    vm.stopPrank();
+
     // BUY maker vs SELL taker: require maker.price >= taker.price
     MyriadCTFExchange.Order memory buyOrder  = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy,  amount, buyPrice,  520);
     MyriadCTFExchange.Order memory sellOrder = _buildOrder(taker, marketId, 0, MyriadCTFExchange.Side.Sell, amount, sellPrice, 521);
@@ -617,6 +622,11 @@ contract MyriadCTFExchangeTest is Test {
     collateral.mint(taker, 1000 ether);
     _approveAll(maker);
     _approveAll(taker);
+
+    vm.startPrank(taker);
+    collateral.approve(address(conditionalTokens), type(uint256).max);
+    conditionalTokens.splitPosition(marketId, amount);
+    vm.stopPrank();
 
     MyriadCTFExchange.Order memory buyOrder  = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy,  amount, price, 530);
     MyriadCTFExchange.Order memory sellOrder = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Sell, amount, price, 531);
