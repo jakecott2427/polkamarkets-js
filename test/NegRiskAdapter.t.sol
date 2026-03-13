@@ -788,6 +788,110 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
   }
 
   // =========================================================================
+  // Cross-market min order amount & dust remainder
+  // =========================================================================
+
+  function testCrossMarketBelowMinAmountReverts() public {
+    (, uint256[] memory marketIds) = _createThreeOutcomeEvent();
+    for (uint256 i = 0; i < 3; i++) _setUniformFees(marketIds[i], 100, 200);
+
+    exchange.setMinOrderAmount(10 ether);
+
+    uint256 price0 = (45 * ONE) / 100;
+    uint256 price1 = (35 * ONE) / 100;
+    uint256 price2 = (20 * ONE) / 100;
+
+    MyriadCTFExchange.Order[] memory orders = new MyriadCTFExchange.Order[](3);
+    orders[0] = _buildOrder(alice, marketIds[0], 0, MyriadCTFExchange.Side.Buy, 5 ether, price0, 1);
+    orders[1] = _buildOrder(bob, marketIds[1], 0, MyriadCTFExchange.Side.Buy, 5 ether, price1, 2);
+    orders[2] = _buildOrder(charlie, marketIds[2], 0, MyriadCTFExchange.Side.Buy, 5 ether, price2, 3);
+
+    bytes[] memory sigs = new bytes[](3);
+    sigs[0] = _signOrder(orders[0], alicePk);
+    sigs[1] = _signOrder(orders[1], bobPk);
+    sigs[2] = _signOrder(orders[2], charliePk);
+
+    vm.expectRevert("below min amount");
+    exchange.matchCrossMarketOrders(orders, sigs, 5 ether);
+  }
+
+  function testCrossMarketDustRemainderReverts() public {
+    (, uint256[] memory marketIds) = _createThreeOutcomeEvent();
+    for (uint256 i = 0; i < 3; i++) _setUniformFees(marketIds[i], 100, 200);
+
+    exchange.setMinOrderAmount(10 ether);
+
+    uint256 fundAmount = 500 ether;
+    for (uint256 i = 0; i < 3; i++) {
+      address user = i == 0 ? alice : (i == 1 ? bob : charlie);
+      collateral.mint(user, fundAmount);
+      vm.startPrank(user);
+      collateral.approve(address(wcol), fundAmount);
+      wcol.wrap(fundAmount);
+      IERC20(address(wcol)).approve(address(exchange), type(uint256).max);
+      conditionalTokens.setApprovalForAll(address(exchange), true);
+      vm.stopPrank();
+    }
+
+    uint256 price0 = (45 * ONE) / 100;
+    uint256 price1 = (35 * ONE) / 100;
+    uint256 price2 = (20 * ONE) / 100;
+
+    // alice has 25 ether order, fill 20 => remaining 5 < minOrderAmount(10)
+    MyriadCTFExchange.Order[] memory orders = new MyriadCTFExchange.Order[](3);
+    orders[0] = _buildOrder(alice, marketIds[0], 0, MyriadCTFExchange.Side.Buy, 25 ether, price0, 1);
+    orders[1] = _buildOrder(bob, marketIds[1], 0, MyriadCTFExchange.Side.Buy, 20 ether, price1, 2);
+    orders[2] = _buildOrder(charlie, marketIds[2], 0, MyriadCTFExchange.Side.Buy, 20 ether, price2, 3);
+
+    bytes[] memory sigs = new bytes[](3);
+    sigs[0] = _signOrder(orders[0], alicePk);
+    sigs[1] = _signOrder(orders[1], bobPk);
+    sigs[2] = _signOrder(orders[2], charliePk);
+
+    vm.expectRevert("dust remainder");
+    exchange.matchCrossMarketOrders(orders, sigs, 20 ether);
+  }
+
+  function testCrossMarketExactRemainderAtMinAllowed() public {
+    (, uint256[] memory marketIds) = _createThreeOutcomeEvent();
+    for (uint256 i = 0; i < 3; i++) _setUniformFees(marketIds[i], 100, 200);
+
+    exchange.setMinOrderAmount(10 ether);
+
+    uint256 fundAmount = 500 ether;
+    for (uint256 i = 0; i < 3; i++) {
+      address user = i == 0 ? alice : (i == 1 ? bob : charlie);
+      collateral.mint(user, fundAmount);
+      vm.startPrank(user);
+      collateral.approve(address(wcol), fundAmount);
+      wcol.wrap(fundAmount);
+      IERC20(address(wcol)).approve(address(exchange), type(uint256).max);
+      conditionalTokens.setApprovalForAll(address(exchange), true);
+      vm.stopPrank();
+    }
+
+    uint256 price0 = (45 * ONE) / 100;
+    uint256 price1 = (35 * ONE) / 100;
+    uint256 price2 = (20 * ONE) / 100;
+
+    // alice has 30 ether order, fill 20 => remaining 10 == minOrderAmount
+    MyriadCTFExchange.Order[] memory orders = new MyriadCTFExchange.Order[](3);
+    orders[0] = _buildOrder(alice, marketIds[0], 0, MyriadCTFExchange.Side.Buy, 30 ether, price0, 1);
+    orders[1] = _buildOrder(bob, marketIds[1], 0, MyriadCTFExchange.Side.Buy, 20 ether, price1, 2);
+    orders[2] = _buildOrder(charlie, marketIds[2], 0, MyriadCTFExchange.Side.Buy, 20 ether, price2, 3);
+
+    bytes[] memory sigs = new bytes[](3);
+    sigs[0] = _signOrder(orders[0], alicePk);
+    sigs[1] = _signOrder(orders[1], bobPk);
+    sigs[2] = _signOrder(orders[2], charliePk);
+
+    exchange.matchCrossMarketOrders(orders, sigs, 20 ether);
+
+    bytes32 hash0 = exchange.hashOrder(orders[0]);
+    assertEq(exchange.filledAmounts(hash0), 20 ether);
+  }
+
+  // =========================================================================
   // Void event
   // =========================================================================
 
