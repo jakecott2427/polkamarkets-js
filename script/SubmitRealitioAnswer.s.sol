@@ -17,34 +17,34 @@ import {IRealityETH_ERC20} from "../contracts/IRealityETH_ERC20.sol";
 ///           ANSWER            — 0 for outcome 0, 1 for outcome 1
 ///           BOND              — bond amount in token wei
 contract SubmitRealitioAnswer is Script {
-    function run() external {
-        uint256 privateKey = vm.envUint("PRIVATE_KEY");
-        address managerAddr = vm.envAddress("CLOB_MANAGER");
-        address oracleAddr = vm.envAddress("REALITIO_ORACLE");
-        address realitioAddr = vm.envAddress("REALITIO");
-        uint256 marketId = vm.envUint("MARKET_ID");
-        uint256 answer = vm.envUint("ANSWER");
-        uint256 bond = vm.envUint("BOND");
+  function run() external {
+    uint256 privateKey = vm.envUint("PRIVATE_KEY");
+    address managerAddr = vm.envAddress("CLOB_MANAGER");
+    address oracleAddr = vm.envAddress("REALITIO_ORACLE");
+    address realitioAddr = vm.envAddress("REALITIO");
+    uint256 marketId = vm.envUint("MARKET_ID");
+    uint256 answer = vm.envUint("ANSWER");
+    uint256 bond = vm.envUint("BOND");
 
-        RealitioOracle oracle = RealitioOracle(oracleAddr);
-        IRealityETH_ERC20 realitio = IRealityETH_ERC20(realitioAddr);
+    RealitioOracle oracle = RealitioOracle(oracleAddr);
+    IRealityETH_ERC20 realitio = IRealityETH_ERC20(realitioAddr);
 
-        (bytes32 questionId, bool initialized) = oracle.questions(marketId);
-        require(initialized, "Market oracle not initialized");
+    (bytes32 questionId, bool initialized) = oracle.questions(marketId);
+    require(initialized, "Market oracle not initialized");
 
-        console.log("Market ID:", marketId);
-        console.log("Question ID:");
-        console.logBytes32(questionId);
-        console.log("Submitting answer:", answer);
+    console.log("Market ID:", marketId);
+    console.log("Question ID:");
+    console.logBytes32(questionId);
+    console.log("Submitting answer:", answer);
 
-        vm.startBroadcast(privateKey);
+    vm.startBroadcast(privateKey);
 
-        realitio.submitAnswerERC20(questionId, bytes32(answer), 0, bond);
-        console.log("Answer submitted to RealityETH");
+    realitio.submitAnswerERC20(questionId, bytes32(answer), 0, bond);
+    console.log("Answer submitted to RealityETH");
 
-        int256 resolved = PredictionMarketV3ManagerCLOB(managerAddr).resolveMarket(marketId);
-        console.log("Market resolved to outcome:", uint256(resolved));
+    int256 resolved = PredictionMarketV3ManagerCLOB(managerAddr).resolveMarket(marketId);
+    console.log("Market resolved to outcome:", uint256(resolved));
 
-        vm.stopBroadcast();
-    }
+    vm.stopBroadcast();
+  }
 }

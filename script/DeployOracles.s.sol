@@ -12,20 +12,20 @@ import {RealitioOracle} from "../contracts/oracles/RealitioOracle.sol";
 ///           CLOB_MANAGER       — address of the deployed PredictionMarketV3ManagerCLOB
 ///           REALITIO_ERC20     — Reality.eth contract address
 contract DeployOracles is Script {
-    function run() external {
-        uint256 privateKey = vm.envUint("PRIVATE_KEY");
-        address managerAddr = vm.envAddress("CLOB_MANAGER");
-        address realitioAddr = vm.envAddress("REALITIO_ERC20");
+  function run() external {
+    uint256 privateKey = vm.envUint("PRIVATE_KEY");
+    address managerAddr = vm.envAddress("CLOB_MANAGER");
+    address realitioAddr = vm.envAddress("REALITIO_ERC20");
 
-        vm.startBroadcast(privateKey);
+    vm.startBroadcast(privateKey);
 
-        RealitioOracle realitioOracle = new RealitioOracle(
-            IRealityETH_ERC20(realitioAddr),
-            managerAddr
-        );
+    RealitioOracle realitioOracle = new RealitioOracle(
+      IRealityETH_ERC20(realitioAddr),
+      managerAddr
+    );
 
-        vm.stopBroadcast();
+    vm.stopBroadcast();
 
-        console.log("RealitioOracle:", address(realitioOracle));
-    }
+    console.log("RealitioOracle:", address(realitioOracle));
+  }
 }
