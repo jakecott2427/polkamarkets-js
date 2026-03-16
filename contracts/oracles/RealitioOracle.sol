@@ -55,12 +55,13 @@ contract RealitioOracle is IMarketOracle {
   ///         Reality.eth bool answers: 1 = true/yes → Outcomes.YES (0),
   ///         0 = false/no → Outcomes.NO (1). INVALID (type(uint256).max) and
   ///         any other non-binary answer → Outcomes.VOIDED (-1).
+  ///         Returns (-2, false) when the question is not yet finalized.
   function getResult(uint256 marketId) external view override returns (int256 outcome, bool resolved) {
     bytes32 questionId = questions[marketId];
     require(questionId != bytes32(0), "!init");
 
     if (!realitio.isFinalized(questionId)) {
-      return (0, false);
+      return (-2, false);
     }
 
     bytes32 rawAnswer = realitio.resultFor(questionId);

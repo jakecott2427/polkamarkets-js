@@ -160,7 +160,7 @@ contract RealitioOracleTest is Test {
     oracle.initialize(marketId, data);
 
     (int256 outcome, bool resolved) = oracle.getResult(marketId);
-    assertEq(outcome, 0);
+    assertEq(outcome, -2);
     assertFalse(resolved);
   }
 
@@ -210,7 +210,7 @@ contract RealitioOracleTest is Test {
     vm.warp(block.timestamp + TIMEOUT - 1);
 
     (int256 outcome, bool resolved) = oracle.getResult(marketId);
-    assertEq(outcome, 0);
+    assertEq(outcome, -2);
     assertFalse(resolved);
   }
 
