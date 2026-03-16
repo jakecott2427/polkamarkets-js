@@ -353,7 +353,7 @@ contract PredictionMarketCLOBTest is Test {
 
     exchange.matchOrdersWithFees(makerOrder, makerSig, takerOrder, takerSig, amount);
 
-    vm.expectRevert("maker overfill");
+    vm.expectRevert("taker overfill");
     exchange.matchOrdersWithFees(makerOrder, makerSig, takerOrder, takerSig, 2 ether);
   }
 

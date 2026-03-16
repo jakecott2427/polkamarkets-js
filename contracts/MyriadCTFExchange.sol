@@ -457,86 +457,24 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
     uint256 fillAmount,
     FeeConfig memory feeConfig
   ) internal returns (uint256 makerFee, uint256 takerFee) {
-    _validateFeeConfig(feeConfig);
-    _validateOrder(maker, makerSig);
     _validateOrder(taker, takerSig);
 
-    require(maker.trader != taker.trader, "self trade");
-    require(maker.price > 0 && taker.price > 0, "bad price");
-    require(maker.price <= ONE && taker.price <= ONE, "price > 1");
-    require(fillAmount > 0, "fill 0");
-
-    bytes32 makerHash = hashOrder(maker);
     bytes32 takerHash = hashOrder(taker);
-
-    uint256 makerFilled = filledAmounts[makerHash];
     uint256 takerFilled = filledAmounts[takerHash];
-    require(makerFilled + fillAmount <= maker.amount, "maker overfill");
     require(takerFilled + fillAmount <= taker.amount, "taker overfill");
-
-    require(maker.minFillAmount == 0 || fillAmount >= maker.minFillAmount, "below maker min fill");
     require(taker.minFillAmount == 0 || fillAmount >= taker.minFillAmount, "below taker min fill");
 
-    // Early balance checks -- revert cheaply before SSTORE writes if a trader
-    // has moved funds away (front-run griefing protection).
-    uint8 matchType;
-    if (maker.side != taker.side) {
-      matchType = 0;
-      uint256 notional = (fillAmount * maker.price) / ONE;
-      IERC20 col = manager.getMarketCollateral(maker.marketId);
-      bool makerIsBuyer = maker.side == Side.Buy;
-      address buyer = makerIsBuyer ? maker.trader : taker.trader;
-      address seller = makerIsBuyer ? taker.trader : maker.trader;
-      uint256 buyerFeeBps = makerIsBuyer ? feeConfig.makerFeeBps : feeConfig.takerFeeBps;
-      _checkCollateralBalance(buyer, col, notional + (notional * buyerFeeBps) / BPS);
-      _checkTokenBalance(seller, conditionalTokens.getTokenId(maker.marketId, maker.outcomeId), fillAmount);
-    } else if (maker.side == Side.Buy) {
-      matchType = 1;
-      uint256 makerNotional = (fillAmount * maker.price) / ONE;
-      uint256 takerNotional = fillAmount - makerNotional;
-      IERC20 col = manager.getMarketCollateral(maker.marketId);
-      _checkCollateralBalance(maker.trader, col, makerNotional + (makerNotional * feeConfig.makerFeeBps) / BPS);
-      _checkCollateralBalance(taker.trader, col, takerNotional + (takerNotional * feeConfig.takerFeeBps) / BPS);
-    } else {
-      matchType = 2;
-      ConditionalTokens _ct = conditionalTokens;
-      _checkTokenBalance(maker.trader, _ct.getTokenId(maker.marketId, maker.outcomeId), fillAmount);
-      _checkTokenBalance(taker.trader, _ct.getTokenId(taker.marketId, taker.outcomeId), fillAmount);
-    }
+    (makerFee, takerFee) = _matchOrdersSingleValidation(
+      maker, makerSig, taker, takerHash, takerFilled + fillAmount, fillAmount, feeConfig
+    );
 
-    makerFilled += fillAmount;
     takerFilled += fillAmount;
-    filledAmounts[makerHash] = makerFilled;
     filledAmounts[takerHash] = takerFilled;
 
     if (minOrderAmount > 0) {
-      uint256 makerRemaining = maker.amount - makerFilled;
-      require(makerRemaining == 0 || makerRemaining >= minOrderAmount, "maker dust remainder");
       uint256 takerRemaining = taker.amount - takerFilled;
       require(takerRemaining == 0 || takerRemaining >= minOrderAmount, "taker dust remainder");
     }
-
-    if (matchType == 0) {
-      (makerFee, takerFee) = _settleDirectMatch(maker, taker, fillAmount, feeConfig);
-    } else if (matchType == 1) {
-      (makerFee, takerFee) = _settleMintMatch(maker, taker, fillAmount, feeConfig);
-    } else {
-      (makerFee, takerFee) = _settleMergeMatch(maker, taker, fillAmount, feeConfig);
-    }
-
-    emit OrdersMatched(
-      makerHash,
-      takerHash,
-      maker.trader,
-      taker.trader,
-      maker.marketId,
-      matchType,
-      fillAmount,
-      makerFilled,
-      takerFilled,
-      makerFee,
-      takerFee
-    );
   }
 
   /// @dev Like _matchOrders but the taker is pre-validated and its filledAmounts
