@@ -14,7 +14,7 @@ contract RealitioOracle is IMarketOracle {
   IRealityETH_ERC20 public immutable realitio;
   address public immutable manager;
 
-  mapping(uint256 => bytes32) public questions;
+  mapping(uint256 marketId => bytes32 questionId) public questions;
 
   event QuestionRegistered(uint256 indexed marketId, bytes32 questionId);
 
