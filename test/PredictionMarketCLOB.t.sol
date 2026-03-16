@@ -357,6 +357,35 @@ contract PredictionMarketCLOBTest is Test {
     exchange.matchOrdersWithFees(makerOrder, makerSig, takerOrder, takerSig, 2 ether);
   }
 
+  function testMakerOnlyOverfillReverts() public {
+    uint256 amount = 100 ether;
+    uint256 outcome0Price = (60 * ONE) / 100;
+    uint256 outcome1Price = (40 * ONE) / 100;
+
+    collateral.mint(maker, 2000 ether);
+    collateral.mint(taker, 2000 ether);
+
+    vm.startPrank(maker);
+    collateral.approve(address(conditionalTokens), type(uint256).max);
+    collateral.approve(address(exchange), type(uint256).max);
+    vm.stopPrank();
+    vm.startPrank(taker);
+    collateral.approve(address(conditionalTokens), type(uint256).max);
+    collateral.approve(address(exchange), type(uint256).max);
+    vm.stopPrank();
+
+    MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 70);
+    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Buy, amount + 50 ether, outcome1Price, 71);
+
+    bytes memory makerSig = _signOrder(makerOrder, makerPk);
+    bytes memory takerSig = _signOrder(takerOrder, takerPk);
+
+    exchange.matchOrdersWithFees(makerOrder, makerSig, takerOrder, takerSig, amount);
+
+    vm.expectRevert("maker overfill");
+    exchange.matchOrdersWithFees(makerOrder, makerSig, takerOrder, takerSig, 2 ether);
+  }
+
   function testPartialFillDirect() public {
     uint256 amount = 100 ether;
     uint256 fill = 30 ether;
