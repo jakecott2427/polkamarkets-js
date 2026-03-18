@@ -464,10 +464,6 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
     require(takerFilled + fillAmount <= taker.amount, "taker overfill");
     require(taker.minFillAmount == 0 || fillAmount >= taker.minFillAmount, "below taker min fill");
 
-    (makerFee, takerFee) = _matchOrdersSingleValidation(
-      maker, makerSig, taker, takerHash, takerFilled + fillAmount, fillAmount, feeConfig
-    );
-
     takerFilled += fillAmount;
     filledAmounts[takerHash] = takerFilled;
 
@@ -475,6 +471,10 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
       uint256 takerRemaining = taker.amount - takerFilled;
       require(takerRemaining == 0 || takerRemaining >= minOrderAmount, "taker dust remainder");
     }
+
+    (makerFee, takerFee) = _matchOrdersSingleValidation(
+      maker, makerSig, taker, takerHash, takerFilled, fillAmount, feeConfig
+    );
   }
 
   /// @dev Like _matchOrders but the taker is pre-validated and its filledAmounts
