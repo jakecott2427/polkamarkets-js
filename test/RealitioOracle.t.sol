@@ -30,6 +30,22 @@ contract RealitioOracleTest is Test {
 
   uint32 internal constant TIMEOUT = 7200; // 2 hours
 
+  mapping(uint256 => string) internal marketQuestions;
+  mapping(uint256 => uint256) internal marketClosesAt;
+
+  function setMarketData(uint256 marketId, string memory question, uint256 closesAt) internal {
+    marketQuestions[marketId] = question;
+    marketClosesAt[marketId] = closesAt;
+  }
+
+  function getMarketClosesAt(uint256 marketId) external view returns (uint256) {
+    return marketClosesAt[marketId];
+  }
+
+  function getMarketQuestion(uint256 marketId) external view returns (string memory) {
+    return marketQuestions[marketId];
+  }
+
   function setUp() public {
     managerAddr = address(this);
     arbitrator = address(0xA4B);
@@ -81,7 +97,9 @@ contract RealitioOracleTest is Test {
 
   function testInitializeRegistersQuestion() public {
     uint256 marketId = 1;
-    bytes memory data = abi.encode("Will it rain?", arbitrator, TIMEOUT, uint32(block.timestamp + 1 days));
+    uint256 closesAt = block.timestamp + 1 days;
+    setMarketData(marketId, "Will it rain?", closesAt);
+    bytes memory data = abi.encode("Will it rain?", arbitrator, TIMEOUT, uint32(closesAt));
 
     oracle.initialize(marketId, data);
 
@@ -91,7 +109,9 @@ contract RealitioOracleTest is Test {
 
   function testInitializeEmitsEvent() public {
     uint256 marketId = 2;
-    bytes memory data = abi.encode("Will it snow?", arbitrator, TIMEOUT, uint32(block.timestamp + 1 days));
+    uint256 closesAt = block.timestamp + 1 days;
+    setMarketData(marketId, "Will it snow?", closesAt);
+    bytes memory data = abi.encode("Will it snow?", arbitrator, TIMEOUT, uint32(closesAt));
 
     vm.expectEmit(true, false, false, false);
     emit RealitioOracle.QuestionRegistered(marketId, bytes32(0));
@@ -101,7 +121,9 @@ contract RealitioOracleTest is Test {
 
   function testInitializeNotManagerReverts() public {
     uint256 marketId = 3;
-    bytes memory data = abi.encode("Q?", arbitrator, TIMEOUT, uint32(block.timestamp + 1 days));
+    uint256 closesAt = block.timestamp + 1 days;
+    setMarketData(marketId, "Q?", closesAt);
+    bytes memory data = abi.encode("Q?", arbitrator, TIMEOUT, uint32(closesAt));
 
     vm.prank(other);
     vm.expectRevert("!manager");
@@ -110,7 +132,9 @@ contract RealitioOracleTest is Test {
 
   function testInitializeDoubleInitReverts() public {
     uint256 marketId = 4;
-    bytes memory data = abi.encode("Q?", arbitrator, TIMEOUT, uint32(block.timestamp + 1 days));
+    uint256 closesAt = block.timestamp + 1 days;
+    setMarketData(marketId, "Q?", closesAt);
+    bytes memory data = abi.encode("Q?", arbitrator, TIMEOUT, uint32(closesAt));
 
     oracle.initialize(marketId, data);
 
@@ -120,7 +144,9 @@ contract RealitioOracleTest is Test {
 
   function testInitializeZeroArbitratorReverts() public {
     uint256 marketId = 5;
-    bytes memory data = abi.encode("Q?", address(0), TIMEOUT, uint32(block.timestamp + 1 days));
+    uint256 closesAt = block.timestamp + 1 days;
+    setMarketData(marketId, "Q?", closesAt);
+    bytes memory data = abi.encode("Q?", address(0), TIMEOUT, uint32(closesAt));
 
     vm.expectRevert("arbitrator 0");
     oracle.initialize(marketId, data);
@@ -128,7 +154,9 @@ contract RealitioOracleTest is Test {
 
   function testInitializeTimeoutTooLowReverts() public {
     uint256 marketId = 6;
-    bytes memory data = abi.encode("Q?", arbitrator, uint32(3599), uint32(block.timestamp + 1 days));
+    uint256 closesAt = block.timestamp + 1 days;
+    setMarketData(marketId, "Q?", closesAt);
+    bytes memory data = abi.encode("Q?", arbitrator, uint32(3599), uint32(closesAt));
 
     vm.expectRevert("timeout < 1h");
     oracle.initialize(marketId, data);
@@ -136,7 +164,9 @@ contract RealitioOracleTest is Test {
 
   function testInitializeMinimumTimeoutAllowed() public {
     uint256 marketId = 7;
-    bytes memory data = abi.encode("Q?", arbitrator, uint32(3600), uint32(block.timestamp + 1 days));
+    uint256 closesAt = block.timestamp + 1 days;
+    setMarketData(marketId, "Q?", closesAt);
+    bytes memory data = abi.encode("Q?", arbitrator, uint32(3600), uint32(closesAt));
 
     oracle.initialize(marketId, data);
 
@@ -156,6 +186,7 @@ contract RealitioOracleTest is Test {
   function testGetResultNotFinalizedReturnsUnresolved() public {
     uint256 marketId = 10;
     uint32 openingTs = uint32(block.timestamp + 100);
+    setMarketData(marketId, "Q?", openingTs);
     bytes memory data = abi.encode("Q?", arbitrator, TIMEOUT, openingTs);
     oracle.initialize(marketId, data);
 
@@ -166,6 +197,7 @@ contract RealitioOracleTest is Test {
 
   function _initAndOpen(uint256 marketId) internal returns (bytes32 questionId) {
     uint32 openingTs = uint32(block.timestamp + 100);
+    setMarketData(marketId, "Q?", openingTs);
     bytes memory data = abi.encode("Q?", arbitrator, TIMEOUT, openingTs);
     oracle.initialize(marketId, data);
     questionId = oracle.questions(marketId);
@@ -261,9 +293,32 @@ contract RealitioOracleTest is Test {
 
   function testInitializeClosesAtInPastReverts() public {
     uint256 marketId = 17;
-    bytes memory data = abi.encode("Q?", arbitrator, TIMEOUT, uint32(block.timestamp - 1));
+    uint256 closesAt = block.timestamp - 1;
+    setMarketData(marketId, "Q?", closesAt);
+    bytes memory data = abi.encode("Q?", arbitrator, TIMEOUT, uint32(closesAt));
 
     vm.expectRevert("closesAt in past");
+    oracle.initialize(marketId, data);
+  }
+
+  function testInitializeClosesAtMismatchReverts() public {
+    uint256 marketId = 18;
+    uint256 storedClosesAt = block.timestamp + 1 days;
+    uint256 oracleDataClosesAt = block.timestamp + 2 days;
+    setMarketData(marketId, "Q?", storedClosesAt);
+    bytes memory data = abi.encode("Q?", arbitrator, TIMEOUT, uint32(oracleDataClosesAt));
+
+    vm.expectRevert("closesAt mismatch");
+    oracle.initialize(marketId, data);
+  }
+
+  function testInitializeQuestionMismatchReverts() public {
+    uint256 marketId = 19;
+    uint256 closesAt = block.timestamp + 1 days;
+    setMarketData(marketId, "Market question?", closesAt);
+    bytes memory data = abi.encode("Different question in oracle?", arbitrator, TIMEOUT, uint32(closesAt));
+
+    vm.expectRevert("question mismatch");
     oracle.initialize(marketId, data);
   }
 
@@ -273,6 +328,8 @@ contract RealitioOracleTest is Test {
 
   function testMultipleMarketsIndependent() public {
     uint32 openingTs = uint32(block.timestamp + 100);
+    setMarketData(1, "Market1?", openingTs);
+    setMarketData(2, "Market2?", openingTs);
     bytes memory data1 = abi.encode("Market1?", arbitrator, TIMEOUT, openingTs);
     bytes memory data2 = abi.encode("Market2?", arbitrator, TIMEOUT, openingTs);
 

@@ -5,6 +5,11 @@ import "../IMarketOracle.sol";
 import "../IRealityETH_ERC20.sol";
 import "../Outcomes.sol";
 
+interface IManagerView {
+  function getMarketClosesAt(uint256 marketId) external view returns (uint256);
+  function getMarketQuestion(uint256 marketId) external view returns (string memory);
+}
+
 /// @title RealitioOracle
 /// @notice Wraps Reality.eth (Realitio) into the IMarketOracle interface so it can
 ///         be used as a pluggable oracle for market resolution.
@@ -37,6 +42,13 @@ contract RealitioOracle is IMarketOracle {
       uint32 timeout,
       uint32 closesAt
     ) = abi.decode(data, (string, address, uint32, uint32));
+
+    IManagerView mgr = IManagerView(manager);
+    require(uint256(closesAt) == mgr.getMarketClosesAt(marketId), "closesAt mismatch");
+    require(
+      keccak256(bytes(question)) == keccak256(bytes(mgr.getMarketQuestion(marketId))),
+      "question mismatch"
+    );
 
     require(arbitrator != address(0), "arbitrator 0");
     require(timeout >= MINIMUM_TIMEOUT, "timeout < 1h");
