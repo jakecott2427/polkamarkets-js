@@ -318,6 +318,12 @@ contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardTransien
     return market.closesAt;
   }
 
+  function getMarketQuestion(uint256 marketId) external view returns (string memory) {
+    Market storage market = _requireMarketExists(marketId);
+
+    return market.question;
+  }
+
   function getMarketOracle(uint256 marketId) external view returns (address) {
     Market storage market = _requireMarketExists(marketId);
 
