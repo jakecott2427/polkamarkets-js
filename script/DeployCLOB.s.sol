@@ -25,74 +25,74 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 ///           OPERATOR         — operator address (default: admin)
 ///           TREASURY         — fee treasury address (default: admin)
 contract DeployCLOB is Script {
-    function run() external {
-        uint256 privateKey = vm.envUint("PRIVATE_KEY");
-        address deployer = vm.addr(privateKey);
+  function run() external {
+    uint256 privateKey = vm.envUint("PRIVATE_KEY");
+    address deployer = vm.addr(privateKey);
 
-        address admin = vm.envOr("ADMIN", deployer);
-        address collateral = vm.envAddress("COLLATERAL");
-        address adminRegistryAddr = vm.envOr("ADMIN_REGISTRY", address(0));
-        address operator = vm.envOr("OPERATOR", admin);
-        address treasuryAddr = vm.envOr("TREASURY", admin);
+    address admin = vm.envOr("ADMIN", deployer);
+    address collateral = vm.envAddress("COLLATERAL");
+    address adminRegistryAddr = vm.envOr("ADMIN_REGISTRY", address(0));
+    address operator = vm.envOr("OPERATOR", admin);
+    address treasuryAddr = vm.envOr("TREASURY", admin);
 
-        bool deployRegistry = adminRegistryAddr == address(0);
+    bool deployRegistry = adminRegistryAddr == address(0);
 
-        vm.startBroadcast(privateKey);
+    vm.startBroadcast(privateKey);
 
-        if (deployRegistry) {
-            adminRegistryAddr = address(new AdminRegistry(admin));
-        }
-
-        AdminRegistry registry = AdminRegistry(adminRegistryAddr);
-
-        // Deploy Manager (UUPS proxy)
-        PredictionMarketV3ManagerCLOB managerImpl = new PredictionMarketV3ManagerCLOB();
-        ERC1967Proxy managerProxy = new ERC1967Proxy(
-            address(managerImpl),
-            abi.encodeCall(PredictionMarketV3ManagerCLOB.initialize, (registry, IERC20(collateral)))
-        );
-        PredictionMarketV3ManagerCLOB manager = PredictionMarketV3ManagerCLOB(address(managerProxy));
-
-        // Deploy ConditionalTokens (no proxy — holds user funds)
-        ConditionalTokens conditionalTokens = new ConditionalTokens(registry, IMyriadMarketManager(address(manager)));
-
-        // Deploy FeeModule (UUPS proxy)
-        FeeModule feeModuleImpl = new FeeModule();
-        ERC1967Proxy feeModuleProxy = new ERC1967Proxy(
-            address(feeModuleImpl),
-            abi.encodeCall(FeeModule.initialize, (registry, treasuryAddr))
-        );
-        FeeModule feeModuleContract = FeeModule(address(feeModuleProxy));
-
-        // Deploy Exchange (UUPS proxy)
-        MyriadCTFExchange exchangeImpl = new MyriadCTFExchange();
-        ERC1967Proxy exchangeProxy = new ERC1967Proxy(
-            address(exchangeImpl),
-            abi.encodeCall(MyriadCTFExchange.initialize, (
-                IMyriadMarketManager(address(manager)),
-                conditionalTokens,
-                address(feeModuleContract),
-                registry
-            ))
-        );
-        MyriadCTFExchange exchange = MyriadCTFExchange(address(exchangeProxy));
-
-        feeModuleContract.setExchange(address(exchange));
-
-        registry.grantRole(registry.MARKET_ADMIN_ROLE(), admin);
-        registry.grantRole(registry.FEE_ADMIN_ROLE(), admin);
-        registry.grantRole(registry.OPERATOR_ROLE(), operator);
-        registry.grantRole(registry.RESOLUTION_ADMIN_ROLE(), admin);
-
-        vm.stopBroadcast();
-
-        console.log("AdminRegistry:", adminRegistryAddr);
-        console.log("Manager:", address(manager));
-        console.log("Manager impl:", address(managerImpl));
-        console.log("ConditionalTokens:", address(conditionalTokens));
-        console.log("FeeModule:", address(feeModuleContract));
-        console.log("FeeModule impl:", address(feeModuleImpl));
-        console.log("Exchange:", address(exchange));
-        console.log("Exchange impl:", address(exchangeImpl));
+    if (deployRegistry) {
+      adminRegistryAddr = address(new AdminRegistry(admin));
     }
+
+    AdminRegistry registry = AdminRegistry(adminRegistryAddr);
+
+    // Deploy Manager (UUPS proxy)
+    PredictionMarketV3ManagerCLOB managerImpl = new PredictionMarketV3ManagerCLOB();
+    ERC1967Proxy managerProxy = new ERC1967Proxy(
+      address(managerImpl),
+      abi.encodeCall(PredictionMarketV3ManagerCLOB.initialize, (registry, IERC20(collateral)))
+    );
+    PredictionMarketV3ManagerCLOB manager = PredictionMarketV3ManagerCLOB(address(managerProxy));
+
+    // Deploy ConditionalTokens (no proxy — holds user funds)
+    ConditionalTokens conditionalTokens = new ConditionalTokens(registry, IMyriadMarketManager(address(manager)));
+
+    // Deploy FeeModule (UUPS proxy)
+    FeeModule feeModuleImpl = new FeeModule();
+    ERC1967Proxy feeModuleProxy = new ERC1967Proxy(
+      address(feeModuleImpl),
+      abi.encodeCall(FeeModule.initialize, (registry, treasuryAddr))
+    );
+    FeeModule feeModuleContract = FeeModule(address(feeModuleProxy));
+
+    // Deploy Exchange (UUPS proxy)
+    MyriadCTFExchange exchangeImpl = new MyriadCTFExchange();
+    ERC1967Proxy exchangeProxy = new ERC1967Proxy(
+      address(exchangeImpl),
+      abi.encodeCall(MyriadCTFExchange.initialize, (
+        IMyriadMarketManager(address(manager)),
+        conditionalTokens,
+        address(feeModuleContract),
+        registry
+      ))
+    );
+    MyriadCTFExchange exchange = MyriadCTFExchange(address(exchangeProxy));
+
+    feeModuleContract.setExchange(address(exchange));
+
+    registry.grantRole(registry.MARKET_ADMIN_ROLE(), admin);
+    registry.grantRole(registry.FEE_ADMIN_ROLE(), admin);
+    registry.grantRole(registry.OPERATOR_ROLE(), operator);
+    registry.grantRole(registry.RESOLUTION_ADMIN_ROLE(), admin);
+
+    vm.stopBroadcast();
+
+    console.log("AdminRegistry:", adminRegistryAddr);
+    console.log("Manager:", address(manager));
+    console.log("Manager impl:", address(managerImpl));
+    console.log("ConditionalTokens:", address(conditionalTokens));
+    console.log("FeeModule:", address(feeModuleContract));
+    console.log("FeeModule impl:", address(feeModuleImpl));
+    console.log("Exchange:", address(exchange));
+    console.log("Exchange impl:", address(exchangeImpl));
+  }
 }

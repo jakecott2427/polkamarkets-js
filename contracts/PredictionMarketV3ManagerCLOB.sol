@@ -63,7 +63,8 @@ contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardTransien
     uint256 indexed marketId,
     string question,
     string image,
-    address collateral
+    address collateral,
+    address oracle
   );
   event MarketResolved(address indexed user, uint256 indexed marketId, int256 outcomeId, uint256 timestamp);
   event MarketPaused(address indexed user, uint256 indexed marketId, bool paused, uint256 timestamp);
@@ -125,7 +126,7 @@ contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardTransien
       IMarketOracle(params.oracle).initialize(marketId, params.oracleData);
     }
 
-    emit MarketCreated(msg.sender, marketId, params.question, params.image, address(collateralToken));
+    emit MarketCreated(msg.sender, marketId, params.question, params.image, address(collateralToken), params.oracle);
   }
 
   /// @notice Create a neg risk binary market with a custom collateral (wcol).
@@ -164,13 +165,17 @@ contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardTransien
       IMarketOracle(params.oracle).initialize(marketId, params.oracleData);
     }
 
-    emit MarketCreated(creator, marketId, params.question, params.image, address(collateralOverride));
+    emit MarketCreated(creator, marketId, params.question, params.image, address(collateralOverride), params.oracle);
+  }
+
+  function _requireMarketExists(uint256 marketId) internal view returns (Market storage market) {
+    market = markets[marketId];
+    require(marketId >= 1 && market.id == marketId, "!m");
   }
 
   /// @notice Permissionless resolution via the market's oracle.
   function resolveMarket(uint256 marketId) external nonReentrant returns (int256 outcomeId) {
-    Market storage market = markets[marketId];
-    require(market.id == marketId, "!m");
+    Market storage market = _requireMarketExists(marketId);
     require(!market.negRisk, "use resolveEvent for neg risk");
     require(getMarketState(marketId) == MarketState.closed, "!closed");
     require(market.state != MarketState.resolved, "resolved");
@@ -191,8 +196,7 @@ contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardTransien
     require(registry.hasRole(registry.RESOLUTION_ADMIN_ROLE(), msg.sender), "not resolution admin");
     require(outcomeId == int256(Outcomes.YES) || outcomeId == int256(Outcomes.NO), "invalid outcome");
 
-    Market storage market = markets[marketId];
-    require(market.id == marketId, "!m");
+    Market storage market = _requireMarketExists(marketId);
     require(market.state != MarketState.resolved, "resolved");
     require(!market.negRisk || msg.sender == negRiskAdapter, "use resolveEvent");
 
@@ -216,8 +220,7 @@ contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardTransien
     require(registry.hasRole(registry.RESOLUTION_ADMIN_ROLE(), msg.sender), "not resolution admin");
     require(outcome0Payout + outcome1Payout == ONE, "payouts must sum to 1e18");
 
-    Market storage market = markets[marketId];
-    require(market.id == marketId, "!m");
+    Market storage market = _requireMarketExists(marketId);
     require(market.state != MarketState.resolved, "resolved");
 
     if (market.negRisk) {
@@ -242,8 +245,7 @@ contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardTransien
   ) external nonReentrant {
     require(registry.hasRole(registry.MARKET_ADMIN_ROLE(), msg.sender), "not market admin");
 
-    Market storage market = markets[marketId];
-    require(market.id == marketId, "!m");
+    Market storage market = _requireMarketExists(marketId);
     require(market.state != MarketState.resolved, "resolved");
 
     address oldOracle = market.oracle;
@@ -260,8 +262,7 @@ contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardTransien
     require(registry.hasRole(registry.MARKET_ADMIN_ROLE(), msg.sender), "not market admin");
     require(newClosesAt >= block.timestamp, "close in past");
 
-    Market storage market = markets[marketId];
-    require(market.id == marketId, "!m");
+    Market storage market = _requireMarketExists(marketId);
     require(market.state != MarketState.resolved, "resolved");
 
     uint256 oldClosesAt = market.closesAt;
@@ -273,8 +274,7 @@ contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardTransien
   function pauseMarket(uint256 marketId, bool paused) external nonReentrant {
     require(registry.hasRole(registry.MARKET_ADMIN_ROLE(), msg.sender), "not market admin");
 
-    Market storage market = markets[marketId];
-    require(market.id == marketId, "!m");
+    Market storage market = _requireMarketExists(marketId);
     market.paused = paused;
 
     emit MarketPaused(msg.sender, marketId, paused, block.timestamp);
@@ -293,8 +293,7 @@ contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardTransien
       bool paused
     )
   {
-    Market storage market = markets[marketId];
-    require(market.id == marketId, "!m");
+    Market storage market = _requireMarketExists(marketId);
 
     return (
       getMarketState(marketId),
@@ -308,36 +307,37 @@ contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardTransien
   }
 
   function getOutcomeTokenIds(uint256 marketId) external view returns (uint256 outcome0TokenId, uint256 outcome1TokenId) {
-    Market storage market = markets[marketId];
-    require(market.id == marketId, "!m");
+    Market storage market = _requireMarketExists(marketId);
 
     return (market.outcome0TokenId, market.outcome1TokenId);
   }
 
   function getMarketClosesAt(uint256 marketId) external view returns (uint256) {
-    Market storage market = markets[marketId];
-    require(market.id == marketId, "!m");
+    Market storage market = _requireMarketExists(marketId);
 
     return market.closesAt;
   }
 
+  function getMarketQuestion(uint256 marketId) external view returns (string memory) {
+    Market storage market = _requireMarketExists(marketId);
+
+    return market.question;
+  }
+
   function getMarketOracle(uint256 marketId) external view returns (address) {
-    Market storage market = markets[marketId];
-    require(market.id == marketId, "!m");
+    Market storage market = _requireMarketExists(marketId);
 
     return market.oracle;
   }
 
   function getMarketCollateral(uint256 marketId) external view override returns (IERC20) {
-    Market storage market = markets[marketId];
-    require(market.id == marketId, "!m");
+    Market storage market = _requireMarketExists(marketId);
 
     return market.collateral;
   }
 
   function getMarketResolvedOutcome(uint256 marketId) external view override returns (int256) {
-    Market storage market = markets[marketId];
-    require(market.id == marketId, "!m");
+    Market storage market = _requireMarketExists(marketId);
 
     if (market.state != MarketState.resolved) {
       return -3;
@@ -347,8 +347,7 @@ contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardTransien
   }
 
   function getMarketState(uint256 marketId) public view override returns (MarketState) {
-    Market storage market = markets[marketId];
-    require(market.id == marketId, "!m");
+    Market storage market = _requireMarketExists(marketId);
 
     if (market.state == MarketState.open && block.timestamp >= market.closesAt) {
       return MarketState.closed;
@@ -358,22 +357,19 @@ contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardTransien
   }
 
   function isMarketPaused(uint256 marketId) external view override returns (bool) {
-    Market storage market = markets[marketId];
-    require(market.id == marketId, "!m");
+    Market storage market = _requireMarketExists(marketId);
 
     return market.paused;
   }
 
   function isMarketTradeable(uint256 marketId) external view override returns (bool) {
-    Market storage market = markets[marketId];
-    require(market.id == marketId, "!m");
+    Market storage market = _requireMarketExists(marketId);
 
     return market.state == MarketState.open && block.timestamp < market.closesAt && !market.paused;
   }
 
   function getVoidedPayouts(uint256 marketId) external view override returns (uint256 outcome0Payout, uint256 outcome1Payout) {
-    Market storage market = markets[marketId];
-    require(market.id == marketId, "!m");
+    Market storage market = _requireMarketExists(marketId);
     require(market.resolvedOutcome == Outcomes.VOIDED, "not voided");
 
     outcome0Payout = voidedPayouts[marketId][0];
@@ -381,13 +377,13 @@ contract PredictionMarketV3ManagerCLOB is Initializable, ReentrancyGuardTransien
   }
 
   function isNegRisk(uint256 marketId) external view returns (bool) {
-    require(markets[marketId].id == marketId, "!m");
-    return markets[marketId].negRisk;
+    Market storage market = _requireMarketExists(marketId);
+    return market.negRisk;
   }
 
   function getEventId(uint256 marketId) external view returns (bytes32) {
-    require(markets[marketId].id == marketId, "!m");
-    return markets[marketId].eventId;
+    Market storage market = _requireMarketExists(marketId);
+    return market.eventId;
   }
 
   /// @notice Returns the total number of markets created (next id to be assigned).

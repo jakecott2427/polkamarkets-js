@@ -10,8 +10,6 @@ set -euo pipefail
 #
 # Oracle support (regular mode only):
 #   - No oracle (admin-only resolution)
-#   - PriceThreshold oracle (Chainlink — price above/below X)
-#   - UpOrDown oracle (Chainlink — price direction)
 #   - Realitio oracle (human-answered questions)
 #
 # Auto-loads defaults from the most recent deploy env file if available.
@@ -257,15 +255,13 @@ fi
 # Regular mode — independent binary markets
 # ═══════════════════════════════════════════════════════════════════════
 
-unset ORACLE CHAINLINK_FEED PRICE_THRESHOLD RESOLVE_ABOVE RESOLVE_UP ARBITRATOR REALITIO_TIMEOUT 2>/dev/null || true
+unset ORACLE ARBITRATOR REALITIO_TIMEOUT 2>/dev/null || true
 
 echo ""
 echo -e "${YELLOW}Oracle type for all markets:${NC}"
 echo "  1) No oracle (admin-only resolution)"
-echo "  2) PriceThreshold (Chainlink — price above/below X)"
-echo "  3) UpOrDown (Chainlink — price direction)"
-echo "  4) Realitio (human-answered questions)"
-read -r -p "  Choose [1-4]: " ORACLE_CHOICE
+echo "  2) Realitio (human-answered questions)"
+read -r -p "  Choose [1-2]: " ORACLE_CHOICE
 ORACLE_CHOICE="${ORACLE_CHOICE:-1}"
 
 ORACLE_TYPE="none"
@@ -273,43 +269,6 @@ ORACLE_ADDR="0x0000000000000000000000000000000000000000"
 
 case "${ORACLE_CHOICE}" in
   2)
-    ORACLE_TYPE="price"
-    prompt_value "ORACLE" "PriceThresholdOracle address" "${PRICE_THRESHOLD_ORACLE:-}"
-    ORACLE_ADDR="${ORACLE}"
-
-    echo ""
-    echo -e "  ${YELLOW}Known Chainlink feeds:${NC}"
-    [[ -n "${CHAINLINK_BTC_USD:-}" ]] && echo "    BTC/USD: ${CHAINLINK_BTC_USD}"
-    [[ -n "${CHAINLINK_ETH_USD:-}" ]] && echo "    ETH/USD: ${CHAINLINK_ETH_USD}"
-    [[ -n "${CHAINLINK_BNB_USD:-}" ]] && echo "    BNB/USD: ${CHAINLINK_BNB_USD}"
-    echo ""
-
-    prompt_value "CHAINLINK_FEED" "Chainlink feed address"
-    prompt_value "PRICE_THRESHOLD" "Price threshold (in feed decimals, e.g. 10000000000000 for \$100k with 8 decimals)"
-    read -r -p "  Outcome 0 wins if price is ABOVE threshold? [Y/n]: " RESOLVE_ABOVE_INPUT
-    RESOLVE_ABOVE_INPUT="${RESOLVE_ABOVE_INPUT:-y}"
-    [[ "${RESOLVE_ABOVE_INPUT}" =~ ^[Yy] ]] && export RESOLVE_ABOVE=true || export RESOLVE_ABOVE=false
-    export CHAINLINK_FEED PRICE_THRESHOLD
-    ;;
-  3)
-    ORACLE_TYPE="updown"
-    prompt_value "ORACLE" "UpOrDownOracle address" "${UPDOWN_ORACLE:-}"
-    ORACLE_ADDR="${ORACLE}"
-
-    echo ""
-    echo -e "  ${YELLOW}Known Chainlink feeds:${NC}"
-    [[ -n "${CHAINLINK_BTC_USD:-}" ]] && echo "    BTC/USD: ${CHAINLINK_BTC_USD}"
-    [[ -n "${CHAINLINK_ETH_USD:-}" ]] && echo "    ETH/USD: ${CHAINLINK_ETH_USD}"
-    [[ -n "${CHAINLINK_BNB_USD:-}" ]] && echo "    BNB/USD: ${CHAINLINK_BNB_USD}"
-    echo ""
-
-    prompt_value "CHAINLINK_FEED" "Chainlink feed address"
-    read -r -p "  Outcome 0 wins if price goes UP? [Y/n]: " RESOLVE_UP_INPUT
-    RESOLVE_UP_INPUT="${RESOLVE_UP_INPUT:-y}"
-    [[ "${RESOLVE_UP_INPUT}" =~ ^[Yy] ]] && export RESOLVE_UP=true || export RESOLVE_UP=false
-    export CHAINLINK_FEED
-    ;;
-  4)
     ORACLE_TYPE="realitio"
     prompt_value "ORACLE" "RealitioOracle address" "${REALITIO_ORACLE:-}"
     ORACLE_ADDR="${ORACLE}"

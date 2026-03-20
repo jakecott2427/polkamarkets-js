@@ -14,30 +14,30 @@ import {NegRiskAdapter} from "../contracts/NegRiskAdapter.sol";
 ///           WINNING_INDEX        — int: -1 = "Other" wins (all NO), 0..N-1 = named outcome wins
 ///           REDEEM               — "true" to also call redeemNOPositions (default: true)
 contract ResolveNegRiskEvent is Script {
-    function run() external {
-        uint256 privateKey = vm.envUint("PRIVATE_KEY");
-        address adapterAddr = vm.envAddress("NEG_RISK_ADAPTER");
-        bytes32 eventId = vm.envBytes32("EVENT_ID");
-        int256 winningIndex = vm.envInt("WINNING_INDEX");
-        bool redeem = vm.envOr("REDEEM", true);
+  function run() external {
+    uint256 privateKey = vm.envUint("PRIVATE_KEY");
+    address adapterAddr = vm.envAddress("NEG_RISK_ADAPTER");
+    bytes32 eventId = vm.envBytes32("EVENT_ID");
+    int256 winningIndex = vm.envInt("WINNING_INDEX");
+    bool redeem = vm.envOr("REDEEM", true);
 
-        vm.startBroadcast(privateKey);
+    vm.startBroadcast(privateKey);
 
-        NegRiskAdapter adapter = NegRiskAdapter(adapterAddr);
-        adapter.resolveEvent(eventId, winningIndex);
+    NegRiskAdapter adapter = NegRiskAdapter(adapterAddr);
+    adapter.resolveEvent(eventId, winningIndex);
 
-        console.log("Event resolved:");
-        console.logBytes32(eventId);
-        console.log("Winning index:", winningIndex >= 0 ? uint256(winningIndex) : 0);
-        if (winningIndex == -1) {
-            console.log("(Other wins - all markets resolve NO)");
-        }
-
-        if (redeem) {
-            adapter.redeemNOPositions(eventId);
-            console.log("NO positions redeemed");
-        }
-
-        vm.stopBroadcast();
+    console.log("Event resolved:");
+    console.logBytes32(eventId);
+    console.log("Winning index:", winningIndex >= 0 ? uint256(winningIndex) : 0);
+    if (winningIndex == -1) {
+      console.log("(Other wins - all markets resolve NO)");
     }
+
+    if (redeem) {
+      adapter.redeemNOPositions(eventId);
+      console.log("NO positions redeemed");
+    }
+
+    vm.stopBroadcast();
+  }
 }

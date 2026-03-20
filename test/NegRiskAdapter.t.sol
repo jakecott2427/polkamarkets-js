@@ -15,6 +15,7 @@ import "../contracts/IMyriadMarketManager.sol";
 import "../contracts/WrappedCollateral.sol";
 import "../contracts/NegRiskAdapter.sol";
 import "../contracts/IMarketOracle.sol";
+import "../contracts/Outcomes.sol";
 
 contract MockERC20NR is ERC20 {
   constructor() ERC20("Collateral", "COL") {}
@@ -167,8 +168,8 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     adapter.splitPosition(eventId, 0, amount);
     vm.stopPrank();
 
-    uint256 yesTokenId = conditionalTokens.getTokenId(marketIds[0], 0);
-    uint256 noTokenId = conditionalTokens.getTokenId(marketIds[0], 1);
+    uint256 yesTokenId = conditionalTokens.getTokenId(marketIds[0], Outcomes.YES);
+    uint256 noTokenId = conditionalTokens.getTokenId(marketIds[0], Outcomes.NO);
 
     assertEq(conditionalTokens.balanceOf(alice, yesTokenId), amount);
     assertEq(conditionalTokens.balanceOf(alice, noTokenId), amount);
@@ -206,17 +207,17 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
 
     // Alice should have YES(0), YES(1), YES(2) — one of each
     for (uint256 i = 0; i < 3; i++) {
-      uint256 yesTokenId = conditionalTokens.getTokenId(marketIds[i], 0);
+      uint256 yesTokenId = conditionalTokens.getTokenId(marketIds[i], Outcomes.YES);
       assertEq(conditionalTokens.balanceOf(alice, yesTokenId), amount, "missing YES token");
     }
 
     // Alice should have no NO tokens for outcome 0
-    uint256 noTokenId0 = conditionalTokens.getTokenId(marketIds[0], 1);
+    uint256 noTokenId0 = conditionalTokens.getTokenId(marketIds[0], Outcomes.NO);
     assertEq(conditionalTokens.balanceOf(alice, noTokenId0), 0);
 
     // Adapter should hold NO tokens for all 3 markets
     for (uint256 i = 0; i < 3; i++) {
-      uint256 noTokenId = conditionalTokens.getTokenId(marketIds[i], 1);
+      uint256 noTokenId = conditionalTokens.getTokenId(marketIds[i], Outcomes.NO);
       assertEq(conditionalTokens.balanceOf(address(adapter), noTokenId), amount);
     }
 
@@ -244,13 +245,13 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
 
     // Exchange (recipient) should have YES for all 3 outcomes
     for (uint256 i = 0; i < 3; i++) {
-      uint256 yesTokenId = conditionalTokens.getTokenId(marketIds[i], 0);
+      uint256 yesTokenId = conditionalTokens.getTokenId(marketIds[i], Outcomes.YES);
       assertEq(conditionalTokens.balanceOf(address(exchange), yesTokenId), amount);
     }
 
     // Adapter holds NO for all 3 outcomes
     for (uint256 i = 0; i < 3; i++) {
-      uint256 noTokenId = conditionalTokens.getTokenId(marketIds[i], 1);
+      uint256 noTokenId = conditionalTokens.getTokenId(marketIds[i], Outcomes.NO);
       assertEq(conditionalTokens.balanceOf(address(adapter), noTokenId), amount);
     }
 
@@ -293,7 +294,7 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     assertEq(manager.getMarketResolvedOutcome(marketIds[2]), 1);
 
     // Alice redeems YES(1) → gets collateral
-    uint256 yesTokenId1 = conditionalTokens.getTokenId(marketIds[1], 0);
+    uint256 yesTokenId1 = conditionalTokens.getTokenId(marketIds[1], Outcomes.YES);
     uint256 aliceYes1Balance = conditionalTokens.balanceOf(alice, yesTokenId1);
     assertEq(aliceYes1Balance, amount);
 
@@ -338,7 +339,7 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     }
 
     // Bob's YES(0) is worthless, but NO(0) is redeemable
-    uint256 noTokenId0 = conditionalTokens.getTokenId(marketIds[0], 1);
+    uint256 noTokenId0 = conditionalTokens.getTokenId(marketIds[0], Outcomes.NO);
     uint256 bobNo0 = conditionalTokens.balanceOf(bob, noTokenId0);
     assertEq(bobNo0, amount);
 
@@ -383,9 +384,9 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     uint256 price1 = (35 * ONE) / 100;
     uint256 price2 = (20 * ONE) / 100;
 
-    MyriadCTFExchange.Order memory order0 = _buildOrder(alice, marketIds[0], 0, MyriadCTFExchange.Side.Buy, amount, price0, 1);
-    MyriadCTFExchange.Order memory order1 = _buildOrder(bob, marketIds[1], 0, MyriadCTFExchange.Side.Buy, amount, price1, 2);
-    MyriadCTFExchange.Order memory order2 = _buildOrder(charlie, marketIds[2], 0, MyriadCTFExchange.Side.Buy, amount, price2, 3);
+    MyriadCTFExchange.Order memory order0 = _buildOrder(alice, marketIds[0], Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, price0, 1);
+    MyriadCTFExchange.Order memory order1 = _buildOrder(bob, marketIds[1], Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, price1, 2);
+    MyriadCTFExchange.Order memory order2 = _buildOrder(charlie, marketIds[2], Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, price2, 3);
 
     MyriadCTFExchange.Order[] memory orders = new MyriadCTFExchange.Order[](3);
     orders[0] = order0;
@@ -400,9 +401,9 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     exchange.matchCrossMarketOrders(orders, sigs, amount);
 
     // Full shares minted — fees added on top of each party's notional
-    assertEq(conditionalTokens.balanceOf(alice, conditionalTokens.getTokenId(marketIds[0], 0)), amount);
-    assertEq(conditionalTokens.balanceOf(bob, conditionalTokens.getTokenId(marketIds[1], 0)), amount);
-    assertEq(conditionalTokens.balanceOf(charlie, conditionalTokens.getTokenId(marketIds[2], 0)), amount);
+    assertEq(conditionalTokens.balanceOf(alice, conditionalTokens.getTokenId(marketIds[0], Outcomes.YES)), amount);
+    assertEq(conditionalTokens.balanceOf(bob, conditionalTokens.getTokenId(marketIds[1], Outcomes.YES)), amount);
+    assertEq(conditionalTokens.balanceOf(charlie, conditionalTokens.getTokenId(marketIds[2], Outcomes.YES)), amount);
 
     bytes32 hash0 = exchange.hashOrder(order0);
     assertEq(exchange.filledAmounts(hash0), amount);
@@ -417,9 +418,9 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     uint256 price2 = (19 * ONE) / 100; // sum = 0.99
 
     MyriadCTFExchange.Order[] memory orders = new MyriadCTFExchange.Order[](3);
-    orders[0] = _buildOrder(alice, marketIds[0], 0, MyriadCTFExchange.Side.Buy, 10 ether, price0, 1);
-    orders[1] = _buildOrder(bob, marketIds[1], 0, MyriadCTFExchange.Side.Buy, 10 ether, price1, 2);
-    orders[2] = _buildOrder(charlie, marketIds[2], 0, MyriadCTFExchange.Side.Buy, 10 ether, price2, 3);
+    orders[0] = _buildOrder(alice, marketIds[0], Outcomes.YES, MyriadCTFExchange.Side.Buy, 10 ether, price0, 1);
+    orders[1] = _buildOrder(bob, marketIds[1], Outcomes.YES, MyriadCTFExchange.Side.Buy, 10 ether, price1, 2);
+    orders[2] = _buildOrder(charlie, marketIds[2], Outcomes.YES, MyriadCTFExchange.Side.Buy, 10 ether, price2, 3);
 
     bytes[] memory sigs = new bytes[](3);
     sigs[0] = _signOrder(orders[0], alicePk);
@@ -463,9 +464,9 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     // Last order (charlie) is the taker, charged takerBps (3%)
     // First two (alice, bob) are makers, charged makerBps (1%)
     MyriadCTFExchange.Order[] memory orders = new MyriadCTFExchange.Order[](3);
-    orders[0] = _buildOrder(alice, marketIds[0], 0, MyriadCTFExchange.Side.Buy, amount, price0, 10);
-    orders[1] = _buildOrder(bob, marketIds[1], 0, MyriadCTFExchange.Side.Buy, amount, price1, 20);
-    orders[2] = _buildOrder(charlie, marketIds[2], 0, MyriadCTFExchange.Side.Buy, amount, price2, 30);
+    orders[0] = _buildOrder(alice, marketIds[0], Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, price0, 10);
+    orders[1] = _buildOrder(bob, marketIds[1], Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, price1, 20);
+    orders[2] = _buildOrder(charlie, marketIds[2], Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, price2, 30);
 
     bytes[] memory sigs = new bytes[](3);
     sigs[0] = _signOrder(orders[0], alicePk);
@@ -529,9 +530,9 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     uint256 price2 = (10 * ONE) / 100;
 
     MyriadCTFExchange.Order[] memory orders = new MyriadCTFExchange.Order[](3);
-    orders[0] = _buildOrder(alice, marketIds[0], 0, MyriadCTFExchange.Side.Buy, fillAmount, price0, 200);
-    orders[1] = _buildOrder(bob, marketIds[1], 0, MyriadCTFExchange.Side.Buy, fillAmount, price1, 201);
-    orders[2] = _buildOrder(charlie, marketIds[2], 0, MyriadCTFExchange.Side.Buy, fillAmount, price2, 202);
+    orders[0] = _buildOrder(alice, marketIds[0], Outcomes.YES, MyriadCTFExchange.Side.Buy, fillAmount, price0, 200);
+    orders[1] = _buildOrder(bob, marketIds[1], Outcomes.YES, MyriadCTFExchange.Side.Buy, fillAmount, price1, 201);
+    orders[2] = _buildOrder(charlie, marketIds[2], Outcomes.YES, MyriadCTFExchange.Side.Buy, fillAmount, price2, 202);
 
     bytes[] memory sigs = new bytes[](3);
     for (uint256 i = 0; i < 3; i++) {
@@ -556,7 +557,7 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
 
     // All three received their YES tokens
     for (uint256 i = 0; i < 3; i++) {
-      assertEq(conditionalTokens.balanceOf(users[i], conditionalTokens.getTokenId(marketIds[i], 0)), fillAmount);
+      assertEq(conditionalTokens.balanceOf(users[i], conditionalTokens.getTokenId(marketIds[i], Outcomes.YES)), fillAmount);
     }
 
     // Surplus = totalNotional - fillAmount = 130 - 100 = 30 → sent to feeModule
@@ -597,9 +598,9 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     uint256 price2 = (30 * ONE) / 100;
 
     MyriadCTFExchange.Order[] memory orders = new MyriadCTFExchange.Order[](3);
-    orders[0] = _buildOrder(alice, marketIds[0], 0, MyriadCTFExchange.Side.Buy, fillAmount, price0, 300);
-    orders[1] = _buildOrder(bob, marketIds[1], 0, MyriadCTFExchange.Side.Buy, fillAmount, price1, 301);
-    orders[2] = _buildOrder(charlie, marketIds[2], 0, MyriadCTFExchange.Side.Buy, fillAmount, price2, 302);
+    orders[0] = _buildOrder(alice, marketIds[0], Outcomes.YES, MyriadCTFExchange.Side.Buy, fillAmount, price0, 300);
+    orders[1] = _buildOrder(bob, marketIds[1], Outcomes.YES, MyriadCTFExchange.Side.Buy, fillAmount, price1, 301);
+    orders[2] = _buildOrder(charlie, marketIds[2], Outcomes.YES, MyriadCTFExchange.Side.Buy, fillAmount, price2, 302);
 
     bytes[] memory sigs = new bytes[](3);
     for (uint256 i = 0; i < 3; i++) {
@@ -641,9 +642,9 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     uint256 price2 = (20 * ONE) / 100;
 
     MyriadCTFExchange.Order[] memory orders = new MyriadCTFExchange.Order[](3);
-    orders[0] = _buildOrder(alice, marketIds[0], 0, MyriadCTFExchange.Side.Buy, fillAmount, price0, 400);
-    orders[1] = _buildOrder(bob, marketIds[1], 0, MyriadCTFExchange.Side.Buy, fillAmount, price1, 401);
-    orders[2] = _buildOrder(charlie, marketIds[2], 0, MyriadCTFExchange.Side.Buy, fillAmount, price2, 402);
+    orders[0] = _buildOrder(alice, marketIds[0], Outcomes.YES, MyriadCTFExchange.Side.Buy, fillAmount, price0, 400);
+    orders[1] = _buildOrder(bob, marketIds[1], Outcomes.YES, MyriadCTFExchange.Side.Buy, fillAmount, price1, 401);
+    orders[2] = _buildOrder(charlie, marketIds[2], Outcomes.YES, MyriadCTFExchange.Side.Buy, fillAmount, price2, 402);
 
     bytes[] memory sigs = new bytes[](3);
     for (uint256 i = 0; i < 3; i++) {
@@ -707,9 +708,9 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     uint256 price2 = (20 * ONE) / 100;
 
     MyriadCTFExchange.Order[] memory orders = new MyriadCTFExchange.Order[](3);
-    orders[0] = _buildOrder(alice, marketIds[0], 0, MyriadCTFExchange.Side.Buy, fillAmount, price0, 500);
-    orders[1] = _buildOrder(bob, marketIds[1], 0, MyriadCTFExchange.Side.Buy, fillAmount, price1, 501);
-    orders[2] = _buildOrder(charlie, marketIds[2], 0, MyriadCTFExchange.Side.Buy, fillAmount, price2, 502);
+    orders[0] = _buildOrder(alice, marketIds[0], Outcomes.YES, MyriadCTFExchange.Side.Buy, fillAmount, price0, 500);
+    orders[1] = _buildOrder(bob, marketIds[1], Outcomes.YES, MyriadCTFExchange.Side.Buy, fillAmount, price1, 501);
+    orders[2] = _buildOrder(charlie, marketIds[2], Outcomes.YES, MyriadCTFExchange.Side.Buy, fillAmount, price2, 502);
 
     bytes[] memory sigs = new bytes[](3);
     for (uint256 i = 0; i < 3; i++) {
@@ -758,9 +759,9 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     uint256 price2 = (20 * ONE) / 100;
 
     MyriadCTFExchange.Order[] memory orders = new MyriadCTFExchange.Order[](3);
-    orders[0] = _buildOrder(alice, marketIds[0], 0, MyriadCTFExchange.Side.Buy, fillAmount, price0, 600);
-    orders[1] = _buildOrder(bob, marketIds[1], 0, MyriadCTFExchange.Side.Buy, fillAmount, price1, 601);
-    orders[2] = _buildOrder(charlie, marketIds[2], 0, MyriadCTFExchange.Side.Buy, fillAmount, price2, 602);
+    orders[0] = _buildOrder(alice, marketIds[0], Outcomes.YES, MyriadCTFExchange.Side.Buy, fillAmount, price0, 600);
+    orders[1] = _buildOrder(bob, marketIds[1], Outcomes.YES, MyriadCTFExchange.Side.Buy, fillAmount, price1, 601);
+    orders[2] = _buildOrder(charlie, marketIds[2], Outcomes.YES, MyriadCTFExchange.Side.Buy, fillAmount, price2, 602);
 
     bytes[] memory sigs = new bytes[](3);
     for (uint256 i = 0; i < 3; i++) {
@@ -774,7 +775,7 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
 
     // All buyers received their tokens
     for (uint256 i = 0; i < 3; i++) {
-      assertEq(conditionalTokens.balanceOf(users[i], conditionalTokens.getTokenId(marketIds[i], 0)), fillAmount);
+      assertEq(conditionalTokens.balanceOf(users[i], conditionalTokens.getTokenId(marketIds[i], Outcomes.YES)), fillAmount);
     }
 
     // Charlie (taker) paid 1 wei more than naive notional to cover rounding
@@ -815,9 +816,9 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     uint256 price2 = (20 * ONE) / 100;
 
     MyriadCTFExchange.Order[] memory orders = new MyriadCTFExchange.Order[](3);
-    orders[0] = _buildOrder(alice, marketIds[0], 0, MyriadCTFExchange.Side.Buy, 100 ether, price0, 1);
-    orders[1] = _buildOrder(bob, marketIds[1], 0, MyriadCTFExchange.Side.Buy, 100 ether, price1, 2);
-    orders[2] = _buildOrder(charlie, marketIds[2], 0, MyriadCTFExchange.Side.Buy, 100 ether, price2, 3);
+    orders[0] = _buildOrder(alice, marketIds[0], Outcomes.YES, MyriadCTFExchange.Side.Buy, 100 ether, price0, 1);
+    orders[1] = _buildOrder(bob, marketIds[1], Outcomes.YES, MyriadCTFExchange.Side.Buy, 100 ether, price1, 2);
+    orders[2] = _buildOrder(charlie, marketIds[2], Outcomes.YES, MyriadCTFExchange.Side.Buy, 100 ether, price2, 3);
 
     bytes[] memory sigs = new bytes[](3);
     sigs[0] = _signOrder(orders[0], alicePk);
@@ -851,9 +852,9 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     uint256 price2 = (20 * ONE) / 100;
 
     MyriadCTFExchange.Order[] memory orders = new MyriadCTFExchange.Order[](3);
-    orders[0] = _buildOrder(alice, marketIds[0], 0, MyriadCTFExchange.Side.Buy, 100 ether, price0, 1);
-    orders[1] = _buildOrder(bob, marketIds[1], 0, MyriadCTFExchange.Side.Buy, 100 ether, price1, 2);
-    orders[2] = _buildOrder(charlie, marketIds[2], 0, MyriadCTFExchange.Side.Buy, 100 ether, price2, 3);
+    orders[0] = _buildOrder(alice, marketIds[0], Outcomes.YES, MyriadCTFExchange.Side.Buy, 100 ether, price0, 1);
+    orders[1] = _buildOrder(bob, marketIds[1], Outcomes.YES, MyriadCTFExchange.Side.Buy, 100 ether, price1, 2);
+    orders[2] = _buildOrder(charlie, marketIds[2], Outcomes.YES, MyriadCTFExchange.Side.Buy, 100 ether, price2, 3);
 
     bytes[] memory sigs = new bytes[](3);
     sigs[0] = _signOrder(orders[0], alicePk);
@@ -879,9 +880,9 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     uint256 price2 = (20 * ONE) / 100;
 
     MyriadCTFExchange.Order[] memory orders = new MyriadCTFExchange.Order[](3);
-    orders[0] = _buildOrder(alice, marketIds[0], 0, MyriadCTFExchange.Side.Buy, 5 ether, price0, 1);
-    orders[1] = _buildOrder(bob, marketIds[1], 0, MyriadCTFExchange.Side.Buy, 5 ether, price1, 2);
-    orders[2] = _buildOrder(charlie, marketIds[2], 0, MyriadCTFExchange.Side.Buy, 5 ether, price2, 3);
+    orders[0] = _buildOrder(alice, marketIds[0], Outcomes.YES, MyriadCTFExchange.Side.Buy, 5 ether, price0, 1);
+    orders[1] = _buildOrder(bob, marketIds[1], Outcomes.YES, MyriadCTFExchange.Side.Buy, 5 ether, price1, 2);
+    orders[2] = _buildOrder(charlie, marketIds[2], Outcomes.YES, MyriadCTFExchange.Side.Buy, 5 ether, price2, 3);
 
     bytes[] memory sigs = new bytes[](3);
     sigs[0] = _signOrder(orders[0], alicePk);
@@ -916,9 +917,9 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
 
     // alice has 25 ether order, fill 20 => remaining 5 < minOrderAmount(10)
     MyriadCTFExchange.Order[] memory orders = new MyriadCTFExchange.Order[](3);
-    orders[0] = _buildOrder(alice, marketIds[0], 0, MyriadCTFExchange.Side.Buy, 25 ether, price0, 1);
-    orders[1] = _buildOrder(bob, marketIds[1], 0, MyriadCTFExchange.Side.Buy, 20 ether, price1, 2);
-    orders[2] = _buildOrder(charlie, marketIds[2], 0, MyriadCTFExchange.Side.Buy, 20 ether, price2, 3);
+    orders[0] = _buildOrder(alice, marketIds[0], Outcomes.YES, MyriadCTFExchange.Side.Buy, 25 ether, price0, 1);
+    orders[1] = _buildOrder(bob, marketIds[1], Outcomes.YES, MyriadCTFExchange.Side.Buy, 20 ether, price1, 2);
+    orders[2] = _buildOrder(charlie, marketIds[2], Outcomes.YES, MyriadCTFExchange.Side.Buy, 20 ether, price2, 3);
 
     bytes[] memory sigs = new bytes[](3);
     sigs[0] = _signOrder(orders[0], alicePk);
@@ -953,9 +954,9 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
 
     // alice has 30 ether order, fill 20 => remaining 10 == minOrderAmount
     MyriadCTFExchange.Order[] memory orders = new MyriadCTFExchange.Order[](3);
-    orders[0] = _buildOrder(alice, marketIds[0], 0, MyriadCTFExchange.Side.Buy, 30 ether, price0, 1);
-    orders[1] = _buildOrder(bob, marketIds[1], 0, MyriadCTFExchange.Side.Buy, 20 ether, price1, 2);
-    orders[2] = _buildOrder(charlie, marketIds[2], 0, MyriadCTFExchange.Side.Buy, 20 ether, price2, 3);
+    orders[0] = _buildOrder(alice, marketIds[0], Outcomes.YES, MyriadCTFExchange.Side.Buy, 30 ether, price0, 1);
+    orders[1] = _buildOrder(bob, marketIds[1], Outcomes.YES, MyriadCTFExchange.Side.Buy, 20 ether, price1, 2);
+    orders[2] = _buildOrder(charlie, marketIds[2], Outcomes.YES, MyriadCTFExchange.Side.Buy, 20 ether, price2, 3);
 
     bytes[] memory sigs = new bytes[](3);
     sigs[0] = _signOrder(orders[0], alicePk);
@@ -1233,7 +1234,7 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
   function _buildOrder(
     address trader,
     uint256 marketId_,
-    uint8 outcome,
+    uint256 outcome,
     MyriadCTFExchange.Side side,
     uint256 amount,
     uint256 price,
@@ -1242,7 +1243,7 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     return MyriadCTFExchange.Order({
       trader: trader,
       marketId: marketId_,
-      outcomeId: outcome,
+      outcomeId: uint8(outcome),
       side: side,
       amount: amount,
       price: price,

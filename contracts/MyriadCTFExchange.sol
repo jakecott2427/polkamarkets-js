@@ -226,6 +226,71 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
     }
   }
 
+  /// @notice Match one taker against multiple makers in a single transaction.
+  ///         Each maker can have a different price (and therefore different fees).
+  ///         The taker is validated once; its filledAmounts is incremented by the
+  ///         sum of all individual fills. One OrdersMatched event per maker fill.
+  /// @dev    Unlike matchOrdersWithFees where taker.minFillAmount constrains each
+  ///         individual fill, here it constrains the aggregate across all makers.
+  ///         Individual fills may be below minFillAmount if their sum satisfies it.
+  function matchMultipleOrdersWithFees(
+    Order[] calldata makers,
+    bytes[] calldata makerSigs,
+    uint256[] calldata fillAmounts,
+    Order calldata taker,
+    bytes calldata takerSig
+  ) external whenNotPaused nonReentrant {
+    require(registry.hasRole(registry.OPERATOR_ROLE(), msg.sender), "not operator");
+    uint256 n = makers.length;
+    require(n > 0, "no makers");
+    require(makerSigs.length == n, "sig count");
+    require(fillAmounts.length == n, "fill count");
+
+    _validateOrder(taker, takerSig);
+    bytes32 takerHash = hashOrder(taker);
+
+    IFeeModule _feeModule = IFeeModule(feeModule);
+    uint256 totalTakerFill;
+    uint256 totalFees;
+    uint256 takerFilledBefore = filledAmounts[takerHash];
+
+    for (uint256 i = 0; i < n; i++) {
+      require(makers[i].marketId == taker.marketId, "market mismatch");
+
+      FeeConfig memory feeConfig;
+      if (makers[i].side != taker.side) {
+        (feeConfig.makerFeeBps, feeConfig.takerFeeBps) =
+          _feeModule.getFeesAtPrice(makers[i].marketId, makers[i].price);
+      } else {
+        (feeConfig.makerFeeBps, ) = _feeModule.getFeesAtPrice(makers[i].marketId, makers[i].price);
+        (, feeConfig.takerFeeBps) = _feeModule.getFeesAtPrice(makers[i].marketId, taker.price);
+      }
+
+      totalTakerFill += fillAmounts[i];
+
+      (uint256 makerFee, uint256 takerFee) = _matchOrdersSingleValidation(
+        makers[i], makerSigs[i], taker, takerHash, takerFilledBefore + totalTakerFill, fillAmounts[i], feeConfig
+      );
+
+      totalFees += makerFee + takerFee;
+    }
+
+    uint256 takerFilledAfter = takerFilledBefore + totalTakerFill;
+    require(takerFilledAfter <= taker.amount, "taker overfill");
+    require(taker.minFillAmount == 0 || totalTakerFill >= taker.minFillAmount, "below taker min fill");
+    filledAmounts[takerHash] = takerFilledAfter;
+
+    if (minOrderAmount > 0) {
+      uint256 takerRemaining = taker.amount - takerFilledAfter;
+      require(takerRemaining == 0 || takerRemaining >= minOrderAmount, "taker dust remainder");
+    }
+
+    if (totalFees > 0) {
+      address token = address(manager.getMarketCollateral(taker.marketId));
+      _feeModule.accrueFees(token, totalFees);
+    }
+  }
+
   // ─── Cross-market settlement ─────────────────────────────────────────
 
   /// @notice Match BUY YES orders across different outcome markets in the same
@@ -392,9 +457,41 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
     uint256 fillAmount,
     FeeConfig memory feeConfig
   ) internal returns (uint256 makerFee, uint256 takerFee) {
+    _validateOrder(taker, takerSig);
+
+    bytes32 takerHash = hashOrder(taker);
+    uint256 takerFilled = filledAmounts[takerHash];
+    require(takerFilled + fillAmount <= taker.amount, "taker overfill");
+    require(taker.minFillAmount == 0 || fillAmount >= taker.minFillAmount, "below taker min fill");
+
+    takerFilled += fillAmount;
+    filledAmounts[takerHash] = takerFilled;
+
+    if (minOrderAmount > 0) {
+      uint256 takerRemaining = taker.amount - takerFilled;
+      require(takerRemaining == 0 || takerRemaining >= minOrderAmount, "taker dust remainder");
+    }
+
+    (makerFee, takerFee) = _matchOrdersSingleValidation(
+      maker, makerSig, taker, takerHash, takerFilled, fillAmount, feeConfig
+    );
+  }
+
+  /// @dev Like _matchOrders but the taker is pre-validated and its filledAmounts
+  ///      is managed by the caller. Used by matchMultipleOrdersWithFees.
+  /// @param takerCumulativeFill The taker's cumulative fill INCLUDING this fill,
+  ///        used for the OrdersMatched event's takerAmountFilled field.
+  function _matchOrdersSingleValidation(
+    Order calldata maker,
+    bytes calldata makerSig,
+    Order calldata taker,
+    bytes32 takerHash,
+    uint256 takerCumulativeFill,
+    uint256 fillAmount,
+    FeeConfig memory feeConfig
+  ) internal returns (uint256 makerFee, uint256 takerFee) {
     _validateFeeConfig(feeConfig);
     _validateOrder(maker, makerSig);
-    _validateOrder(taker, takerSig);
 
     require(maker.trader != taker.trader, "self trade");
     require(maker.price > 0 && taker.price > 0, "bad price");
@@ -402,18 +499,11 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
     require(fillAmount > 0, "fill 0");
 
     bytes32 makerHash = hashOrder(maker);
-    bytes32 takerHash = hashOrder(taker);
 
     uint256 makerFilled = filledAmounts[makerHash];
-    uint256 takerFilled = filledAmounts[takerHash];
     require(makerFilled + fillAmount <= maker.amount, "maker overfill");
-    require(takerFilled + fillAmount <= taker.amount, "taker overfill");
-
     require(maker.minFillAmount == 0 || fillAmount >= maker.minFillAmount, "below maker min fill");
-    require(taker.minFillAmount == 0 || fillAmount >= taker.minFillAmount, "below taker min fill");
 
-    // Early balance checks -- revert cheaply before SSTORE writes if a trader
-    // has moved funds away (front-run griefing protection).
     uint8 matchType;
     if (maker.side != taker.side) {
       matchType = 0;
@@ -440,15 +530,11 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
     }
 
     makerFilled += fillAmount;
-    takerFilled += fillAmount;
     filledAmounts[makerHash] = makerFilled;
-    filledAmounts[takerHash] = takerFilled;
 
     if (minOrderAmount > 0) {
       uint256 makerRemaining = maker.amount - makerFilled;
       require(makerRemaining == 0 || makerRemaining >= minOrderAmount, "maker dust remainder");
-      uint256 takerRemaining = taker.amount - takerFilled;
-      require(takerRemaining == 0 || takerRemaining >= minOrderAmount, "taker dust remainder");
     }
 
     if (matchType == 0) {
@@ -468,7 +554,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
       matchType,
       fillAmount,
       makerFilled,
-      takerFilled,
+      takerCumulativeFill,
       makerFee,
       takerFee
     );
@@ -509,7 +595,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
     );
     if (!success) {
       if (returndata.length > 0) {
-        assembly { revert(add(returndata, 32), mload(returndata)) }
+        assembly ("memory-safe") { revert(add(returndata, 32), mload(returndata)) }
       }
       revert("transfer failed");
     }

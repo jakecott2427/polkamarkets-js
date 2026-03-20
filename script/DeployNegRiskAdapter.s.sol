@@ -23,63 +23,63 @@ import {NegRiskAdapter} from "../contracts/NegRiskAdapter.sol";
 ///           COLLATERAL            — underlying collateral token (e.g. USDC)
 ///           TREASURY              — fee treasury address
 contract DeployNegRiskAdapter is Script {
-    function run() external {
-        uint256 privateKey = vm.envUint("PRIVATE_KEY");
+  function run() external {
+    uint256 privateKey = vm.envUint("PRIVATE_KEY");
 
-        address registryAddr = vm.envAddress("ADMIN_REGISTRY");
-        address managerAddr = vm.envAddress("CLOB_MANAGER");
-        address ctAddr = vm.envAddress("CLOB_CONDITIONAL_TOKENS");
-        address exchangeAddr = vm.envAddress("CLOB_EXCHANGE");
-        address collateral = vm.envAddress("COLLATERAL");
-        address treasuryAddr = vm.envAddress("TREASURY");
+    address registryAddr = vm.envAddress("ADMIN_REGISTRY");
+    address managerAddr = vm.envAddress("CLOB_MANAGER");
+    address ctAddr = vm.envAddress("CLOB_CONDITIONAL_TOKENS");
+    address exchangeAddr = vm.envAddress("CLOB_EXCHANGE");
+    address collateral = vm.envAddress("COLLATERAL");
+    address treasuryAddr = vm.envAddress("TREASURY");
 
-        AdminRegistry registry = AdminRegistry(registryAddr);
+    AdminRegistry registry = AdminRegistry(registryAddr);
 
-        vm.startBroadcast(privateKey);
+    vm.startBroadcast(privateKey);
 
-        // Deploy WrappedCollateral (adapter address not known yet, use CREATE2-style workaround)
-        // We deploy adapter first with a placeholder, then set. Actually, WrappedCollateral
-        // needs the adapter address at construction. We use a two-step approach:
-        // 1. Predict adapter address via CREATE nonce
-        // 2. Deploy wcol with predicted address
-        // 3. Deploy adapter with wcol
+    // Deploy WrappedCollateral (adapter address not known yet, use CREATE2-style workaround)
+    // We deploy adapter first with a placeholder, then set. Actually, WrappedCollateral
+    // needs the adapter address at construction. We use a two-step approach:
+    // 1. Predict adapter address via CREATE nonce
+    // 2. Deploy wcol with predicted address
+    // 3. Deploy adapter with wcol
 
-        // Simpler approach: deploy adapter first, then wcol, then link.
-        // But wcol.adapter is immutable, so we need to know the adapter address first.
-        // Use vm.computeCreateAddress to predict.
+    // Simpler approach: deploy adapter first, then wcol, then link.
+    // But wcol.adapter is immutable, so we need to know the adapter address first.
+    // Use vm.computeCreateAddress to predict.
 
-        address deployer = vm.addr(privateKey);
-        uint64 nonce = vm.getNonce(deployer);
-        // wcol will be deployed at nonce, adapter at nonce+1
-        address predictedAdapter = vm.computeCreateAddress(deployer, nonce + 1);
+    address deployer = vm.addr(privateKey);
+    uint64 nonce = vm.getNonce(deployer);
+    // wcol will be deployed at nonce, adapter at nonce+1
+    address predictedAdapter = vm.computeCreateAddress(deployer, nonce + 1);
 
-        WrappedCollateral wcolContract = new WrappedCollateral(
-            IERC20(collateral),
-            predictedAdapter
-        );
+    WrappedCollateral wcolContract = new WrappedCollateral(
+      IERC20(collateral),
+      predictedAdapter
+    );
 
-        NegRiskAdapter adapter = new NegRiskAdapter(
-            registry,
-            PredictionMarketV3ManagerCLOB(managerAddr),
-            ConditionalTokens(ctAddr),
-            wcolContract,
-            treasuryAddr
-        );
+    NegRiskAdapter adapter = new NegRiskAdapter(
+      registry,
+      PredictionMarketV3ManagerCLOB(managerAddr),
+      ConditionalTokens(ctAddr),
+      wcolContract,
+      treasuryAddr
+    );
 
-        require(address(adapter) == predictedAdapter, "adapter address mismatch");
+    require(address(adapter) == predictedAdapter, "adapter address mismatch");
 
-        // Wire adapter to Manager and Exchange
-        PredictionMarketV3ManagerCLOB(managerAddr).setNegRiskAdapter(address(adapter));
-        MyriadCTFExchange(exchangeAddr).setNegRiskAdapter(address(adapter));
-        adapter.setExchange(exchangeAddr);
+    // Wire adapter to Manager and Exchange
+    PredictionMarketV3ManagerCLOB(managerAddr).setNegRiskAdapter(address(adapter));
+    MyriadCTFExchange(exchangeAddr).setNegRiskAdapter(address(adapter));
+    adapter.setExchange(exchangeAddr);
 
-        // Grant roles to adapter
-        registry.grantRole(registry.MARKET_ADMIN_ROLE(), address(adapter));
-        registry.grantRole(registry.RESOLUTION_ADMIN_ROLE(), address(adapter));
+    // Grant roles to adapter
+    registry.grantRole(registry.MARKET_ADMIN_ROLE(), address(adapter));
+    registry.grantRole(registry.RESOLUTION_ADMIN_ROLE(), address(adapter));
 
-        vm.stopBroadcast();
+    vm.stopBroadcast();
 
-        console.log("WrappedCollateral:", address(wcolContract));
-        console.log("NegRiskAdapter:", address(adapter));
-    }
+    console.log("WrappedCollateral:", address(wcolContract));
+    console.log("NegRiskAdapter:", address(adapter));
+  }
 }

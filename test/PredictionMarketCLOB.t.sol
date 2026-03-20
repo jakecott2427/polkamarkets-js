@@ -12,6 +12,7 @@ import "../contracts/MyriadCTFExchange.sol";
 import "../contracts/FeeModule.sol";
 import "../contracts/IMyriadMarketManager.sol";
 import "../contracts/IMarketOracle.sol";
+import "../contracts/Outcomes.sol";
 
 contract MockERC20 is ERC20 {
   constructor() ERC20("Collateral", "COL") {}
@@ -61,10 +62,12 @@ contract PredictionMarketCLOBTest is Test {
   address internal operator;
   address internal maker;
   address internal taker;
+  address internal maker2;
   address internal treasury;
 
   uint256 internal makerPk = 0xA11CE;
   uint256 internal takerPk = 0xB0B;
+  uint256 internal maker2Pk = 0xC4A;
 
   uint256 internal marketId;
 
@@ -73,6 +76,7 @@ contract PredictionMarketCLOBTest is Test {
     operator = address(this);
     maker = vm.addr(makerPk);
     taker = vm.addr(takerPk);
+    maker2 = vm.addr(maker2Pk);
     treasury = address(0xBEEF);
 
     collateral = new MockERC20();
@@ -150,8 +154,8 @@ contract PredictionMarketCLOBTest is Test {
     collateral.approve(address(exchange), type(uint256).max);
     vm.stopPrank();
 
-    MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 1);
-    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 2);
+    MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 1);
+    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 2);
 
     uint256 makerBefore = collateral.balanceOf(maker);
     uint256 takerBefore = collateral.balanceOf(taker);
@@ -198,8 +202,8 @@ contract PredictionMarketCLOBTest is Test {
     uint256 outcome0TokenId = (marketId << 1) | 0;
     assertEq(conditionalTokens.balanceOf(maker, outcome0TokenId), amount);
 
-    MyriadCTFExchange.Order memory sellOrder = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Sell, amount, outcome0Price, 20);
-    MyriadCTFExchange.Order memory buyOrder = _buildOrder(taker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 21);
+    MyriadCTFExchange.Order memory sellOrder = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Sell, amount, outcome0Price, 20);
+    MyriadCTFExchange.Order memory buyOrder = _buildOrder(taker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 21);
     exchange.matchOrdersWithFees(sellOrder, _signOrder(sellOrder, makerPk), buyOrder, _signOrder(buyOrder, takerPk), amount);
 
     assertEq(conditionalTokens.balanceOf(maker, outcome0TokenId), 0);
@@ -230,8 +234,8 @@ contract PredictionMarketCLOBTest is Test {
     vm.prank(taker);
     conditionalTokens.splitPosition(marketId, amount);
 
-    MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Sell, amount, outcome0Price, 30);
-    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Sell, amount, outcome1Price, 31);
+    MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Sell, amount, outcome0Price, 30);
+    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Sell, amount, outcome1Price, 31);
     exchange.matchOrdersWithFees(makerOrder, _signOrder(makerOrder, makerPk), takerOrder, _signOrder(takerOrder, takerPk), amount);
 
     uint256 outcome0TokenId = (marketId << 1) | 0;
@@ -262,8 +266,8 @@ contract PredictionMarketCLOBTest is Test {
     collateral.approve(address(exchange), type(uint256).max);
     vm.stopPrank();
 
-    MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 40);
-    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 41);
+    MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 40);
+    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 41);
 
     bytes memory makerSig = _signOrder(makerOrder, makerPk);
     bytes memory takerSig = _signOrder(takerOrder, takerPk);
@@ -302,8 +306,8 @@ contract PredictionMarketCLOBTest is Test {
     collateral.approve(address(exchange), type(uint256).max);
     vm.stopPrank();
 
-    MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 50);
-    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 51);
+    MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 50);
+    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 51);
 
     bytes memory makerSig = _signOrder(makerOrder, makerPk);
     bytes memory takerSig = _signOrder(takerOrder, takerPk);
@@ -341,8 +345,37 @@ contract PredictionMarketCLOBTest is Test {
     collateral.approve(address(exchange), type(uint256).max);
     vm.stopPrank();
 
-    MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 60);
-    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 61);
+    MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 60);
+    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 61);
+
+    bytes memory makerSig = _signOrder(makerOrder, makerPk);
+    bytes memory takerSig = _signOrder(takerOrder, takerPk);
+
+    exchange.matchOrdersWithFees(makerOrder, makerSig, takerOrder, takerSig, amount);
+
+    vm.expectRevert("taker overfill");
+    exchange.matchOrdersWithFees(makerOrder, makerSig, takerOrder, takerSig, 2 ether);
+  }
+
+  function testMakerOnlyOverfillReverts() public {
+    uint256 amount = 100 ether;
+    uint256 outcome0Price = (60 * ONE) / 100;
+    uint256 outcome1Price = (40 * ONE) / 100;
+
+    collateral.mint(maker, 2000 ether);
+    collateral.mint(taker, 2000 ether);
+
+    vm.startPrank(maker);
+    collateral.approve(address(conditionalTokens), type(uint256).max);
+    collateral.approve(address(exchange), type(uint256).max);
+    vm.stopPrank();
+    vm.startPrank(taker);
+    collateral.approve(address(conditionalTokens), type(uint256).max);
+    collateral.approve(address(exchange), type(uint256).max);
+    vm.stopPrank();
+
+    MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 70);
+    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Buy, amount + 50 ether, outcome1Price, 71);
 
     bytes memory makerSig = _signOrder(makerOrder, makerPk);
     bytes memory takerSig = _signOrder(takerOrder, takerPk);
@@ -372,8 +405,8 @@ contract PredictionMarketCLOBTest is Test {
     collateral.approve(address(exchange), type(uint256).max);
     vm.stopPrank();
 
-    MyriadCTFExchange.Order memory sellOrder = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Sell, amount, outcome0Price, 80);
-    MyriadCTFExchange.Order memory buyOrder = _buildOrder(taker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 81);
+    MyriadCTFExchange.Order memory sellOrder = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Sell, amount, outcome0Price, 80);
+    MyriadCTFExchange.Order memory buyOrder = _buildOrder(taker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 81);
 
     exchange.matchOrdersWithFees(sellOrder, _signOrder(sellOrder, makerPk), buyOrder, _signOrder(buyOrder, takerPk), fill);
 
@@ -403,8 +436,8 @@ contract PredictionMarketCLOBTest is Test {
     collateral.approve(address(exchange), type(uint256).max);
     vm.stopPrank();
 
-    MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 90);
-    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 91);
+    MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 90);
+    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 91);
 
     bytes memory makerSig = _signOrder(makerOrder, makerPk);
     bytes memory takerSig = _signOrder(takerOrder, takerPk);
@@ -436,8 +469,8 @@ contract PredictionMarketCLOBTest is Test {
     collateral.approve(address(exchange), type(uint256).max);
     vm.stopPrank();
 
-    MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 100);
-    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 101);
+    MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 100);
+    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 101);
 
     bytes memory makerSig = _signOrder(makerOrder, makerPk);
     bytes memory takerSig = _signOrder(takerOrder, takerPk);
@@ -454,7 +487,7 @@ contract PredictionMarketCLOBTest is Test {
   }
 
   function testCancelAlreadyCancelledReverts() public {
-    MyriadCTFExchange.Order memory order = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, 10 ether, (50 * ONE) / 100, 110);
+    MyriadCTFExchange.Order memory order = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, 10 ether, (50 * ONE) / 100, 110);
 
     MyriadCTFExchange.Order[] memory toCancel = new MyriadCTFExchange.Order[](1);
     toCancel[0] = order;
@@ -468,7 +501,7 @@ contract PredictionMarketCLOBTest is Test {
   }
 
   function testCancelSomeoneElsesOrderReverts() public {
-    MyriadCTFExchange.Order memory order = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, 10 ether, (50 * ONE) / 100, 120);
+    MyriadCTFExchange.Order memory order = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, 10 ether, (50 * ONE) / 100, 120);
 
     MyriadCTFExchange.Order[] memory toCancel = new MyriadCTFExchange.Order[](1);
     toCancel[0] = order;
@@ -494,8 +527,8 @@ contract PredictionMarketCLOBTest is Test {
     collateral.approve(address(exchange), type(uint256).max);
     vm.stopPrank();
 
-    MyriadCTFExchange.Order memory order1 = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 130);
-    MyriadCTFExchange.Order memory order2 = _buildOrder(maker, marketId, 1, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 131);
+    MyriadCTFExchange.Order memory order1 = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 130);
+    MyriadCTFExchange.Order memory order2 = _buildOrder(maker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 131);
 
     bytes memory sig1 = _signOrder(order1, makerPk);
     bytes memory sig2 = _signOrder(order2, makerPk);
@@ -532,7 +565,7 @@ contract PredictionMarketCLOBTest is Test {
       nonce: 140,
       expiration: block.timestamp + 1
     });
-    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 141);
+    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 141);
 
     bytes memory makerSig = _signOrder(makerOrder, makerPk);
     bytes memory takerSig = _signOrder(takerOrder, takerPk);
@@ -564,8 +597,8 @@ contract PredictionMarketCLOBTest is Test {
     collateral.approve(address(exchange), type(uint256).max);
     vm.stopPrank();
 
-    MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 150);
-    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 151);
+    MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 150);
+    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 151);
 
     bytes memory makerSig = _signOrder(makerOrder, makerPk);
     bytes memory takerSig = _signOrder(takerOrder, takerPk);
@@ -602,8 +635,8 @@ contract PredictionMarketCLOBTest is Test {
     collateral.approve(address(conditionalTokens), type(uint256).max);
     vm.stopPrank();
 
-    MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, zeroFeeMarketId, 0, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 170);
-    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, zeroFeeMarketId, 1, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 171);
+    MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, zeroFeeMarketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 170);
+    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, zeroFeeMarketId, Outcomes.NO, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 171);
 
     uint256 makerBefore = collateral.balanceOf(maker);
     uint256 takerBefore = collateral.balanceOf(taker);
@@ -640,8 +673,8 @@ contract PredictionMarketCLOBTest is Test {
     vm.prank(taker);
     conditionalTokens.splitPosition(marketId, amount);
 
-    MyriadCTFExchange.Order memory buyOrder = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 182);
-    MyriadCTFExchange.Order memory sellOrder = _buildOrder(taker, marketId, 0, MyriadCTFExchange.Side.Sell, amount, (50 * ONE) / 100, 183);
+    MyriadCTFExchange.Order memory buyOrder = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 182);
+    MyriadCTFExchange.Order memory sellOrder = _buildOrder(taker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Sell, amount, (50 * ONE) / 100, 183);
 
     exchange.matchOrdersWithFees(buyOrder, _signOrder(buyOrder, makerPk), sellOrder, _signOrder(sellOrder, takerPk), amount);
 
@@ -669,8 +702,8 @@ contract PredictionMarketCLOBTest is Test {
 
     vm.warp(block.timestamp + 2 days);
 
-    MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 190);
-    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 191);
+    MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 190);
+    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 191);
 
     bytes memory makerSig = _signOrder(makerOrder, makerPk);
     bytes memory takerSig = _signOrder(takerOrder, takerPk);
@@ -696,10 +729,10 @@ contract PredictionMarketCLOBTest is Test {
     collateral.approve(address(conditionalTokens), type(uint256).max);
     vm.stopPrank();
 
-    manager.adminResolveMarket(marketId, 0);
+    manager.adminResolveMarket(marketId, int256(Outcomes.YES));
 
-    MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 200);
-    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 201);
+    MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 200);
+    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 201);
 
     bytes memory makerSig = _signOrder(makerOrder, makerPk);
     bytes memory takerSig = _signOrder(takerOrder, takerPk);
@@ -763,8 +796,8 @@ contract PredictionMarketCLOBTest is Test {
     collateral.approve(address(exchange), type(uint256).max);
     vm.stopPrank();
 
-    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 210);
-    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 211);
+    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 210);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 211);
     exchange.matchOrdersWithFees(m, _signOrder(m, makerPk), t, _signOrder(t, takerPk), amount);
 
     vm.warp(block.timestamp + 2 days);
@@ -800,8 +833,8 @@ contract PredictionMarketCLOBTest is Test {
     collateral.approve(address(exchange), type(uint256).max);
     vm.stopPrank();
 
-    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 220);
-    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 221);
+    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 220);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 221);
     exchange.matchOrdersWithFees(m, _signOrder(m, makerPk), t, _signOrder(t, takerPk), amount);
 
     vm.warp(block.timestamp + 2 days);
@@ -856,7 +889,7 @@ contract PredictionMarketCLOBTest is Test {
 
   function testRedeemVoidedNotVoidedReverts() public {
     vm.warp(block.timestamp + 2 days);
-    manager.adminResolveMarket(marketId, 0);
+    manager.adminResolveMarket(marketId, int256(Outcomes.YES));
 
     vm.prank(maker);
     vm.expectRevert("not voided");
@@ -910,7 +943,7 @@ contract PredictionMarketCLOBTest is Test {
 
   function testSetClosesAtResolvedReverts() public {
     vm.warp(block.timestamp + 2 days);
-    manager.adminResolveMarket(marketId, 0);
+    manager.adminResolveMarket(marketId, int256(Outcomes.YES));
 
     vm.expectRevert("resolved");
     manager.adminSetClosesAt(marketId, block.timestamp + 1 days);
@@ -947,8 +980,8 @@ contract PredictionMarketCLOBTest is Test {
     collateral.approve(address(exchange), type(uint256).max);
     vm.stopPrank();
 
-    MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 240);
-    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 241);
+    MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 240);
+    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 241);
 
     bytes memory makerSig = _signOrder(makerOrder, makerPk);
     bytes memory takerSig = _signOrder(takerOrder, takerPk);
@@ -974,8 +1007,8 @@ contract PredictionMarketCLOBTest is Test {
     collateral.approve(address(exchange), type(uint256).max);
     vm.stopPrank();
 
-    MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 250);
-    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 251);
+    MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 250);
+    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 251);
 
     exchange.matchOrdersWithFees(makerOrder, _signOrder(makerOrder, makerPk), takerOrder, _signOrder(takerOrder, takerPk), amount);
 
@@ -1005,8 +1038,8 @@ contract PredictionMarketCLOBTest is Test {
 
     manager.pauseMarket(marketId, true);
 
-    MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 260);
-    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 261);
+    MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 260);
+    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 261);
 
     bytes memory makerSig = _signOrder(makerOrder, makerPk);
     bytes memory takerSig = _signOrder(takerOrder, takerPk);
@@ -1040,8 +1073,8 @@ contract PredictionMarketCLOBTest is Test {
     collateral.approve(address(exchange), type(uint256).max);
     vm.stopPrank();
 
-    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 300);
-    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 301);
+    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 300);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 301);
     exchange.matchOrdersWithFees(m, _signOrder(m, makerPk), t, _signOrder(t, takerPk), amount);
 
     uint256 totalFees = collateral.balanceOf(address(feeModule));
@@ -1081,8 +1114,8 @@ contract PredictionMarketCLOBTest is Test {
     collateral.approve(address(exchange), type(uint256).max);
     vm.stopPrank();
 
-    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 320);
-    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 321);
+    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 320);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 321);
     exchange.matchOrdersWithFees(m, _signOrder(m, makerPk), t, _signOrder(t, takerPk), amount);
 
     uint256 totalFees = collateral.balanceOf(address(feeModule));
@@ -1108,15 +1141,15 @@ contract PredictionMarketCLOBTest is Test {
     collateral.approve(address(exchange), type(uint256).max);
     vm.stopPrank();
 
-    MyriadCTFExchange.Order memory m1 = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 400);
-    MyriadCTFExchange.Order memory t1 = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 401);
+    MyriadCTFExchange.Order memory m1 = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 400);
+    MyriadCTFExchange.Order memory t1 = _buildOrder(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 401);
     exchange.matchOrdersWithFees(m1, _signOrder(m1, makerPk), t1, _signOrder(t1, takerPk), amount);
 
     uint256 feesAfterFirst = collateral.balanceOf(address(feeModule));
     assertTrue(feesAfterFirst > 0, "should have fees after first match");
 
-    MyriadCTFExchange.Order memory m2 = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 402);
-    MyriadCTFExchange.Order memory t2 = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 403);
+    MyriadCTFExchange.Order memory m2 = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 402);
+    MyriadCTFExchange.Order memory t2 = _buildOrder(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 403);
     exchange.matchOrdersWithFees(m2, _signOrder(m2, makerPk), t2, _signOrder(t2, takerPk), amount);
 
     uint256 feesAfterSecond = collateral.balanceOf(address(feeModule));
@@ -1207,7 +1240,7 @@ contract PredictionMarketCLOBTest is Test {
   function testAdminResolveBypassesOracle() public {
     oracle.setResult(marketId, 1, true);
 
-    int256 result = manager.adminResolveMarket(marketId, 0);
+    int256 result = manager.adminResolveMarket(marketId, int256(Outcomes.YES));
     assertEq(result, 0);
     assertEq(manager.getMarketResolvedOutcome(marketId), 0);
   }
@@ -1233,7 +1266,7 @@ contract PredictionMarketCLOBTest is Test {
   }
 
   function testUpdateOracleResolvedReverts() public {
-    manager.adminResolveMarket(marketId, 0);
+    manager.adminResolveMarket(marketId, int256(Outcomes.YES));
 
     MockOracle newOracle = new MockOracle();
     vm.expectRevert("resolved");
@@ -1252,8 +1285,85 @@ contract PredictionMarketCLOBTest is Test {
     uint256 newMarket = manager.createMarket(params);
     assertEq(manager.getMarketOracle(newMarket), address(0));
 
-    manager.adminResolveMarket(newMarket, 1);
+    manager.adminResolveMarket(newMarket, int256(Outcomes.NO));
     assertEq(manager.getMarketResolvedOutcome(newMarket), 1);
+  }
+
+  // =========================================================================
+  // Oracle integration: end-to-end tests
+  // =========================================================================
+
+  function testOracleVoidedOutcomeResolvesViaAdmin() public {
+    PredictionMarketV3ManagerCLOB.CreateMarketParams memory params = PredictionMarketV3ManagerCLOB.CreateMarketParams({
+      closesAt: block.timestamp + 1 days,
+      question: "Oracle voided?",
+      image: "",
+      feeModule: address(feeModule),
+      oracle: address(oracle),
+      oracleData: abi.encode("init")
+    });
+    uint256 mid = manager.createMarket(params);
+
+    uint256 amount = 100 ether;
+    uint256 outcome0Price = (60 * ONE) / 100;
+    uint256 outcome1Price = (40 * ONE) / 100;
+
+    collateral.mint(maker, 1000 ether);
+    collateral.mint(taker, 1000 ether);
+
+    vm.startPrank(maker);
+    collateral.approve(address(conditionalTokens), type(uint256).max);
+    collateral.approve(address(exchange), type(uint256).max);
+    vm.stopPrank();
+    vm.startPrank(taker);
+    collateral.approve(address(conditionalTokens), type(uint256).max);
+    collateral.approve(address(exchange), type(uint256).max);
+    vm.stopPrank();
+
+    _setUniformFees(mid, 0, 0);
+
+    MyriadCTFExchange.Order memory m = _buildOrder(maker, mid, Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 4000);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, mid, Outcomes.NO, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 4001);
+    exchange.matchOrdersWithFees(m, _signOrder(m, makerPk), t, _signOrder(t, takerPk), amount);
+
+    vm.warp(block.timestamp + 2 days);
+
+    oracle.setResult(mid, -1, true);
+
+    vm.expectRevert("invalid outcome");
+    manager.resolveMarket(mid);
+
+    uint256 payout0 = (50 * ONE) / 100;
+    uint256 payout1 = (50 * ONE) / 100;
+    int256 result = manager.adminVoidMarket(mid, payout0, payout1);
+    assertEq(result, -1);
+    assertEq(uint8(manager.getMarketState(mid)), uint8(IMyriadMarketManager.MarketState.resolved));
+    assertEq(manager.getMarketResolvedOutcome(mid), -1);
+
+    uint256 makerBefore = collateral.balanceOf(maker);
+    uint256 takerBefore = collateral.balanceOf(taker);
+
+    vm.prank(maker);
+    conditionalTokens.redeemVoided(mid);
+    vm.prank(taker);
+    conditionalTokens.redeemVoided(mid);
+
+    assertEq(collateral.balanceOf(maker), makerBefore + (amount * 50) / 100);
+    assertEq(collateral.balanceOf(taker), takerBefore + (amount * 50) / 100);
+  }
+
+  function testResolveMarketId0Reverts() public {
+    vm.expectRevert(bytes("!m"));
+    manager.resolveMarket(0);
+
+    vm.expectRevert(bytes("!m"));
+    manager.adminResolveMarket(0, int256(Outcomes.YES));
+
+    vm.expectRevert(bytes("!m"));
+    manager.adminVoidMarket(0, (50 * ONE) / 100, (50 * ONE) / 100);
+
+    vm.expectRevert(bytes("!m"));
+    manager.getMarketState(0);
   }
 
   // =========================================================================
@@ -1277,8 +1387,8 @@ contract PredictionMarketCLOBTest is Test {
     collateral.approve(address(exchange), type(uint256).max);
     vm.stopPrank();
 
-    MyriadCTFExchange.Order memory makerOrder = _buildOrderWithMinFill(maker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 50 ether, 500);
-    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 501);
+    MyriadCTFExchange.Order memory makerOrder = _buildOrderWithMinFill(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 50 ether, 500);
+    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 501);
 
     bytes memory makerSig = _signOrder(makerOrder, makerPk);
     bytes memory takerSig = _signOrder(takerOrder, takerPk);
@@ -1310,8 +1420,8 @@ contract PredictionMarketCLOBTest is Test {
     collateral.approve(address(exchange), type(uint256).max);
     vm.stopPrank();
 
-    MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 510);
-    MyriadCTFExchange.Order memory takerOrder = _buildOrderWithMinFill(taker, marketId, 1, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 30 ether, 511);
+    MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 510);
+    MyriadCTFExchange.Order memory takerOrder = _buildOrderWithMinFill(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 30 ether, 511);
 
     bytes memory makerSig = _signOrder(makerOrder, makerPk);
     bytes memory takerSig = _signOrder(takerOrder, takerPk);
@@ -1339,8 +1449,8 @@ contract PredictionMarketCLOBTest is Test {
     collateral.approve(address(exchange), type(uint256).max);
     vm.stopPrank();
 
-    MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 520);
-    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 521);
+    MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 520);
+    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 521);
 
     uint256 fill = 2 ether;
     exchange.matchOrdersWithFees(makerOrder, _signOrder(makerOrder, makerPk), takerOrder, _signOrder(takerOrder, takerPk), fill);
@@ -1373,8 +1483,8 @@ contract PredictionMarketCLOBTest is Test {
 
     exchange.pause();
 
-    MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 600);
-    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 601);
+    MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 600);
+    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 601);
 
     bytes memory makerSig = _signOrder(makerOrder, makerPk);
     bytes memory takerSig = _signOrder(takerOrder, takerPk);
@@ -1403,8 +1513,8 @@ contract PredictionMarketCLOBTest is Test {
     exchange.pause();
     exchange.unpause();
 
-    MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 610);
-    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 611);
+    MyriadCTFExchange.Order memory makerOrder = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, outcome0Price, 610);
+    MyriadCTFExchange.Order memory takerOrder = _buildOrder(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Buy, amount, outcome1Price, 611);
 
     exchange.matchOrdersWithFees(makerOrder, _signOrder(makerOrder, makerPk), takerOrder, _signOrder(takerOrder, takerPk), amount);
 
@@ -1430,7 +1540,7 @@ contract PredictionMarketCLOBTest is Test {
   function testCancelOrdersWhilePaused() public {
     exchange.pause();
 
-    MyriadCTFExchange.Order memory order = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, 10 ether, (50 * ONE) / 100, 620);
+    MyriadCTFExchange.Order memory order = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, 10 ether, (50 * ONE) / 100, 620);
 
     MyriadCTFExchange.Order[] memory toCancel = new MyriadCTFExchange.Order[](1);
     toCancel[0] = order;
@@ -1442,7 +1552,6 @@ contract PredictionMarketCLOBTest is Test {
     assertTrue(exchange.orderInvalidated(orderHash));
   }
 
-  // =========================================================================
   // setCallbackGasLimit
   // =========================================================================
 
@@ -1493,13 +1602,871 @@ contract PredictionMarketCLOBTest is Test {
     vm.prank(taker);
     collateral.approve(address(exchange), type(uint256).max);
 
-    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Sell, amount, price, 1100);
-    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, price, 1101);
+    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Sell, amount, price, 1100);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, price, 1101);
 
     exchange.matchOrdersWithFees(m, _signOrder(m, makerPk), t, _signOrder(t, takerPk), amount);
 
-    uint256 tokenId = conditionalTokens.getTokenId(marketId, 0);
+    uint256 tokenId = conditionalTokens.getTokenId(marketId, Outcomes.YES);
     assertEq(conditionalTokens.balanceOf(taker, tokenId), amount);
+  }
+
+  // =========================================================================
+  // matchMultipleOrdersWithFees
+  // =========================================================================
+
+  function testMatchMultipleDirect() public {
+    uint256 amount = 100 ether;
+    uint256 price = (60 * ONE) / 100;
+
+    collateral.mint(maker, 1000 ether);
+    collateral.mint(maker2, 1000 ether);
+    collateral.mint(taker, 1000 ether);
+
+    vm.prank(maker);
+    collateral.approve(address(conditionalTokens), type(uint256).max);
+    vm.prank(maker2);
+    collateral.approve(address(conditionalTokens), type(uint256).max);
+
+    vm.prank(maker);
+    conditionalTokens.splitPosition(marketId, amount);
+    vm.prank(maker2);
+    conditionalTokens.splitPosition(marketId, amount);
+
+    vm.prank(maker);
+    conditionalTokens.setApprovalForAll(address(exchange), true);
+    vm.prank(maker2);
+    conditionalTokens.setApprovalForAll(address(exchange), true);
+    vm.prank(taker);
+    collateral.approve(address(exchange), type(uint256).max);
+
+    MyriadCTFExchange.Order memory m1 = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Sell, amount, price, 300);
+    MyriadCTFExchange.Order memory m2 = _buildOrder(maker2, marketId, Outcomes.YES, MyriadCTFExchange.Side.Sell, amount, price, 301);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, 200 ether, price, 302);
+
+    MyriadCTFExchange.Order[] memory makers = new MyriadCTFExchange.Order[](2);
+    makers[0] = m1;
+    makers[1] = m2;
+    bytes[] memory makerSigs = new bytes[](2);
+    makerSigs[0] = _signOrder(m1, makerPk);
+    makerSigs[1] = _signOrder(m2, maker2Pk);
+    uint256[] memory fills = new uint256[](2);
+    fills[0] = amount;
+    fills[1] = amount;
+
+    exchange.matchMultipleOrdersWithFees(makers, makerSigs, fills, t, _signOrder(t, takerPk));
+
+    uint256 tokenId = conditionalTokens.getTokenId(marketId, Outcomes.YES);
+    assertEq(conditionalTokens.balanceOf(taker, tokenId), 200 ether);
+
+    assertEq(exchange.filledAmounts(exchange.hashOrder(m1)), amount);
+    assertEq(exchange.filledAmounts(exchange.hashOrder(m2)), amount);
+
+    assertEq(exchange.filledAmounts(exchange.hashOrder(t)), 200 ether);
+  }
+
+  function testMatchMultipleDifferentPrices() public {
+    uint256 price1 = (50 * ONE) / 100;
+    uint256 price2 = (60 * ONE) / 100;
+
+    collateral.mint(maker, 1000 ether);
+    collateral.mint(maker2, 1000 ether);
+    collateral.mint(taker, 1000 ether);
+
+    vm.prank(maker);
+    collateral.approve(address(conditionalTokens), type(uint256).max);
+    vm.prank(maker2);
+    collateral.approve(address(conditionalTokens), type(uint256).max);
+
+    vm.prank(maker);
+    conditionalTokens.splitPosition(marketId, 50 ether);
+    vm.prank(maker2);
+    conditionalTokens.splitPosition(marketId, 80 ether);
+
+    vm.prank(maker);
+    conditionalTokens.setApprovalForAll(address(exchange), true);
+    vm.prank(maker2);
+    conditionalTokens.setApprovalForAll(address(exchange), true);
+    vm.prank(taker);
+    collateral.approve(address(exchange), type(uint256).max);
+
+    MyriadCTFExchange.Order memory m1 = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Sell, 50 ether, price1, 400);
+    MyriadCTFExchange.Order memory m2 = _buildOrder(maker2, marketId, Outcomes.YES, MyriadCTFExchange.Side.Sell, 80 ether, price2, 401);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, 130 ether, price2, 402);
+
+    MyriadCTFExchange.Order[] memory makers = new MyriadCTFExchange.Order[](2);
+    makers[0] = m1;
+    makers[1] = m2;
+    bytes[] memory makerSigs = new bytes[](2);
+    makerSigs[0] = _signOrder(m1, makerPk);
+    makerSigs[1] = _signOrder(m2, maker2Pk);
+    uint256[] memory fills = new uint256[](2);
+    fills[0] = 50 ether;
+    fills[1] = 80 ether;
+
+    exchange.matchMultipleOrdersWithFees(makers, makerSigs, fills, t, _signOrder(t, takerPk));
+
+    uint256 tokenId = conditionalTokens.getTokenId(marketId, Outcomes.YES);
+    assertEq(conditionalTokens.balanceOf(taker, tokenId), 130 ether);
+    assertEq(exchange.filledAmounts(exchange.hashOrder(t)), 130 ether);
+  }
+
+  function testMatchMultipleMintMatch() public {
+    uint256 price1 = (60 * ONE) / 100;
+    uint256 price2 = (40 * ONE) / 100;
+
+    collateral.mint(maker, 1000 ether);
+    collateral.mint(maker2, 1000 ether);
+    collateral.mint(taker, 1000 ether);
+
+    vm.prank(maker);
+    collateral.approve(address(exchange), type(uint256).max);
+    vm.prank(maker2);
+    collateral.approve(address(exchange), type(uint256).max);
+    vm.prank(taker);
+    collateral.approve(address(exchange), type(uint256).max);
+
+    MyriadCTFExchange.Order memory m1 = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, 50 ether, price1, 500);
+    MyriadCTFExchange.Order memory m2 = _buildOrder(maker2, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, 50 ether, price1, 501);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Buy, 100 ether, price2, 502);
+
+    MyriadCTFExchange.Order[] memory makers = new MyriadCTFExchange.Order[](2);
+    makers[0] = m1;
+    makers[1] = m2;
+    bytes[] memory makerSigs = new bytes[](2);
+    makerSigs[0] = _signOrder(m1, makerPk);
+    makerSigs[1] = _signOrder(m2, maker2Pk);
+    uint256[] memory fills = new uint256[](2);
+    fills[0] = 50 ether;
+    fills[1] = 50 ether;
+
+    exchange.matchMultipleOrdersWithFees(makers, makerSigs, fills, t, _signOrder(t, takerPk));
+
+    uint256 tokenId0 = conditionalTokens.getTokenId(marketId, Outcomes.YES);
+    uint256 tokenId1 = conditionalTokens.getTokenId(marketId, Outcomes.NO);
+    assertEq(conditionalTokens.balanceOf(maker, tokenId0), 50 ether);
+    assertEq(conditionalTokens.balanceOf(maker2, tokenId0), 50 ether);
+    assertEq(conditionalTokens.balanceOf(taker, tokenId1), 100 ether);
+    assertEq(exchange.filledAmounts(exchange.hashOrder(t)), 100 ether);
+  }
+
+  function testMatchMultiplePartialFill() public {
+    uint256 price = (60 * ONE) / 100;
+
+    collateral.mint(maker, 1000 ether);
+    collateral.mint(taker, 1000 ether);
+
+    vm.prank(maker);
+    collateral.approve(address(conditionalTokens), type(uint256).max);
+    vm.prank(maker);
+    conditionalTokens.splitPosition(marketId, 200 ether);
+    vm.prank(maker);
+    conditionalTokens.setApprovalForAll(address(exchange), true);
+    vm.prank(taker);
+    collateral.approve(address(exchange), type(uint256).max);
+
+    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Sell, 200 ether, price, 600);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, 200 ether, price, 601);
+
+    MyriadCTFExchange.Order[] memory makers = new MyriadCTFExchange.Order[](1);
+    makers[0] = m;
+    bytes[] memory makerSigs = new bytes[](1);
+    makerSigs[0] = _signOrder(m, makerPk);
+    uint256[] memory fills = new uint256[](1);
+    fills[0] = 80 ether;
+
+    exchange.matchMultipleOrdersWithFees(makers, makerSigs, fills, t, _signOrder(t, takerPk));
+
+    assertEq(exchange.filledAmounts(exchange.hashOrder(m)), 80 ether);
+    assertEq(exchange.filledAmounts(exchange.hashOrder(t)), 80 ether);
+
+    fills[0] = 120 ether;
+    exchange.matchMultipleOrdersWithFees(makers, makerSigs, fills, t, _signOrder(t, takerPk));
+
+    assertEq(exchange.filledAmounts(exchange.hashOrder(m)), 200 ether);
+    assertEq(exchange.filledAmounts(exchange.hashOrder(t)), 200 ether);
+  }
+
+  function testMatchMultipleTakerOverfillReverts() public {
+    uint256 price = (60 * ONE) / 100;
+
+    collateral.mint(maker, 1000 ether);
+    collateral.mint(maker2, 1000 ether);
+    collateral.mint(taker, 1000 ether);
+
+    vm.prank(maker);
+    collateral.approve(address(conditionalTokens), type(uint256).max);
+    vm.prank(maker2);
+    collateral.approve(address(conditionalTokens), type(uint256).max);
+    vm.prank(maker);
+    conditionalTokens.splitPosition(marketId, 100 ether);
+    vm.prank(maker2);
+    conditionalTokens.splitPosition(marketId, 100 ether);
+    vm.prank(maker);
+    conditionalTokens.setApprovalForAll(address(exchange), true);
+    vm.prank(maker2);
+    conditionalTokens.setApprovalForAll(address(exchange), true);
+    vm.prank(taker);
+    collateral.approve(address(exchange), type(uint256).max);
+
+    MyriadCTFExchange.Order memory m1 = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Sell, 100 ether, price, 700);
+    MyriadCTFExchange.Order memory m2 = _buildOrder(maker2, marketId, Outcomes.YES, MyriadCTFExchange.Side.Sell, 100 ether, price, 701);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, 150 ether, price, 702);
+
+    MyriadCTFExchange.Order[] memory makers = new MyriadCTFExchange.Order[](2);
+    makers[0] = m1;
+    makers[1] = m2;
+    bytes[] memory makerSigs = new bytes[](2);
+    makerSigs[0] = _signOrder(m1, makerPk);
+    makerSigs[1] = _signOrder(m2, maker2Pk);
+    uint256[] memory fills = new uint256[](2);
+    fills[0] = 100 ether;
+    fills[1] = 100 ether;
+    bytes memory takerSig = _signOrder(t, takerPk);
+
+    vm.expectRevert("taker overfill");
+    exchange.matchMultipleOrdersWithFees(makers, makerSigs, fills, t, takerSig);
+  }
+
+  function testMatchMultipleMakerOverfillReverts() public {
+    uint256 price = (60 * ONE) / 100;
+
+    collateral.mint(maker, 1000 ether);
+    collateral.mint(taker, 1000 ether);
+
+    vm.prank(maker);
+    collateral.approve(address(conditionalTokens), type(uint256).max);
+    vm.prank(maker);
+    conditionalTokens.splitPosition(marketId, 100 ether);
+    vm.prank(maker);
+    conditionalTokens.setApprovalForAll(address(exchange), true);
+    vm.prank(taker);
+    collateral.approve(address(exchange), type(uint256).max);
+
+    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Sell, 50 ether, price, 800);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, 200 ether, price, 801);
+
+    MyriadCTFExchange.Order[] memory makers = new MyriadCTFExchange.Order[](1);
+    makers[0] = m;
+    bytes[] memory makerSigs = new bytes[](1);
+    makerSigs[0] = _signOrder(m, makerPk);
+    uint256[] memory fills = new uint256[](1);
+    fills[0] = 60 ether;
+    bytes memory takerSig = _signOrder(t, takerPk);
+
+    vm.expectRevert("maker overfill");
+    exchange.matchMultipleOrdersWithFees(makers, makerSigs, fills, t, takerSig);
+  }
+
+  function testMatchMultipleEmptyMakersReverts() public {
+    uint256 price = (60 * ONE) / 100;
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, 100 ether, price, 900);
+
+    MyriadCTFExchange.Order[] memory makers = new MyriadCTFExchange.Order[](0);
+    bytes[] memory makerSigs = new bytes[](0);
+    uint256[] memory fills = new uint256[](0);
+    bytes memory takerSig = _signOrder(t, takerPk);
+
+    vm.expectRevert("no makers");
+    exchange.matchMultipleOrdersWithFees(makers, makerSigs, fills, t, takerSig);
+  }
+
+  function testMatchMultipleLengthMismatchReverts() public {
+    uint256 price = (60 * ONE) / 100;
+    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Sell, 100 ether, price, 910);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, 100 ether, price, 911);
+
+    MyriadCTFExchange.Order[] memory makers = new MyriadCTFExchange.Order[](1);
+    makers[0] = m;
+    bytes[] memory makerSigs = new bytes[](1);
+    makerSigs[0] = _signOrder(m, makerPk);
+    uint256[] memory fills = new uint256[](2);
+    fills[0] = 50 ether;
+    fills[1] = 50 ether;
+    bytes memory takerSig = _signOrder(t, takerPk);
+
+    vm.expectRevert("fill count");
+    exchange.matchMultipleOrdersWithFees(makers, makerSigs, fills, t, takerSig);
+  }
+
+  function testMatchMultipleSelfTradeReverts() public {
+    uint256 price = (60 * ONE) / 100;
+
+    collateral.mint(maker, 1000 ether);
+    vm.prank(maker);
+    collateral.approve(address(conditionalTokens), type(uint256).max);
+    vm.prank(maker);
+    conditionalTokens.splitPosition(marketId, 100 ether);
+    vm.prank(maker);
+    conditionalTokens.setApprovalForAll(address(exchange), true);
+    vm.prank(maker);
+    collateral.approve(address(exchange), type(uint256).max);
+
+    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Sell, 100 ether, price, 920);
+    MyriadCTFExchange.Order memory t = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, 100 ether, price, 921);
+
+    MyriadCTFExchange.Order[] memory makers = new MyriadCTFExchange.Order[](1);
+    makers[0] = m;
+    bytes[] memory makerSigs = new bytes[](1);
+    makerSigs[0] = _signOrder(m, makerPk);
+    uint256[] memory fills = new uint256[](1);
+    fills[0] = 100 ether;
+    bytes memory takerSig = _signOrder(t, makerPk);
+
+    vm.expectRevert("self trade");
+    exchange.matchMultipleOrdersWithFees(makers, makerSigs, fills, t, takerSig);
+  }
+
+  function testMatchMultipleMarketMismatchReverts() public {
+    PredictionMarketV3ManagerCLOB.CreateMarketParams memory params2 = PredictionMarketV3ManagerCLOB.CreateMarketParams({
+      closesAt: block.timestamp + 1 days,
+      question: "Will it snow?",
+      image: "",
+      feeModule: address(feeModule),
+      oracle: address(0),
+      oracleData: ""
+    });
+    uint256 marketId2 = manager.createMarket(params2);
+
+    uint256 price = (60 * ONE) / 100;
+    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId2, Outcomes.YES, MyriadCTFExchange.Side.Sell, 100 ether, price, 930);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, 100 ether, price, 931);
+
+    MyriadCTFExchange.Order[] memory makers = new MyriadCTFExchange.Order[](1);
+    makers[0] = m;
+    bytes[] memory makerSigs = new bytes[](1);
+    makerSigs[0] = _signOrder(m, makerPk);
+    uint256[] memory fills = new uint256[](1);
+    fills[0] = 100 ether;
+    bytes memory takerSig = _signOrder(t, takerPk);
+
+    vm.expectRevert("market mismatch");
+    exchange.matchMultipleOrdersWithFees(makers, makerSigs, fills, t, takerSig);
+  }
+
+  function testMatchMultipleTakerMinFillEnforced() public {
+    uint256 price = (60 * ONE) / 100;
+
+    collateral.mint(maker, 1000 ether);
+    collateral.mint(taker, 1000 ether);
+
+    vm.prank(maker);
+    collateral.approve(address(conditionalTokens), type(uint256).max);
+    vm.prank(maker);
+    conditionalTokens.splitPosition(marketId, 100 ether);
+    vm.prank(maker);
+    conditionalTokens.setApprovalForAll(address(exchange), true);
+    vm.prank(taker);
+    collateral.approve(address(exchange), type(uint256).max);
+
+    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Sell, 100 ether, price, 940);
+    MyriadCTFExchange.Order memory t = _buildOrderWithMinFill(taker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, 100 ether, price, 80 ether, 941);
+
+    MyriadCTFExchange.Order[] memory makers = new MyriadCTFExchange.Order[](1);
+    makers[0] = m;
+    bytes[] memory makerSigs = new bytes[](1);
+    makerSigs[0] = _signOrder(m, makerPk);
+    uint256[] memory fills = new uint256[](1);
+    fills[0] = 50 ether;
+    bytes memory takerSig = _signOrder(t, takerPk);
+
+    vm.expectRevert("below taker min fill");
+    exchange.matchMultipleOrdersWithFees(makers, makerSigs, fills, t, takerSig);
+  }
+
+  function testMatchMultipleTakerMinFillSatisfiedByAggregate() public {
+    uint256 price = (60 * ONE) / 100;
+
+    collateral.mint(maker, 1000 ether);
+    collateral.mint(maker2, 1000 ether);
+    collateral.mint(taker, 1000 ether);
+
+    vm.prank(maker);
+    collateral.approve(address(conditionalTokens), type(uint256).max);
+    vm.prank(maker2);
+    collateral.approve(address(conditionalTokens), type(uint256).max);
+    vm.prank(maker);
+    conditionalTokens.splitPosition(marketId, 50 ether);
+    vm.prank(maker2);
+    conditionalTokens.splitPosition(marketId, 50 ether);
+    vm.prank(maker);
+    conditionalTokens.setApprovalForAll(address(exchange), true);
+    vm.prank(maker2);
+    conditionalTokens.setApprovalForAll(address(exchange), true);
+    vm.prank(taker);
+    collateral.approve(address(exchange), type(uint256).max);
+
+    MyriadCTFExchange.Order memory m1 = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Sell, 50 ether, price, 950);
+    MyriadCTFExchange.Order memory m2 = _buildOrder(maker2, marketId, Outcomes.YES, MyriadCTFExchange.Side.Sell, 50 ether, price, 951);
+    MyriadCTFExchange.Order memory t = _buildOrderWithMinFill(taker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, 100 ether, price, 80 ether, 952);
+
+    MyriadCTFExchange.Order[] memory makers = new MyriadCTFExchange.Order[](2);
+    makers[0] = m1;
+    makers[1] = m2;
+    bytes[] memory makerSigs = new bytes[](2);
+    makerSigs[0] = _signOrder(m1, makerPk);
+    makerSigs[1] = _signOrder(m2, maker2Pk);
+    uint256[] memory fills = new uint256[](2);
+    fills[0] = 50 ether;
+    fills[1] = 50 ether;
+
+    exchange.matchMultipleOrdersWithFees(makers, makerSigs, fills, t, _signOrder(t, takerPk));
+
+    assertEq(exchange.filledAmounts(exchange.hashOrder(t)), 100 ether);
+  }
+
+  function testMatchMultipleFeesAccrued() public {
+    uint256 price = (60 * ONE) / 100;
+    uint256 amount = 100 ether;
+
+    collateral.mint(maker, 1000 ether);
+    collateral.mint(maker2, 1000 ether);
+    collateral.mint(taker, 1000 ether);
+
+    vm.prank(maker);
+    collateral.approve(address(conditionalTokens), type(uint256).max);
+    vm.prank(maker2);
+    collateral.approve(address(conditionalTokens), type(uint256).max);
+    vm.prank(maker);
+    conditionalTokens.splitPosition(marketId, amount);
+    vm.prank(maker2);
+    conditionalTokens.splitPosition(marketId, amount);
+    vm.prank(maker);
+    conditionalTokens.setApprovalForAll(address(exchange), true);
+    vm.prank(maker2);
+    conditionalTokens.setApprovalForAll(address(exchange), true);
+    vm.prank(taker);
+    collateral.approve(address(exchange), type(uint256).max);
+
+    uint256 feeModuleBefore = collateral.balanceOf(address(feeModule));
+
+    MyriadCTFExchange.Order memory m1 = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Sell, amount, price, 960);
+    MyriadCTFExchange.Order memory m2 = _buildOrder(maker2, marketId, Outcomes.YES, MyriadCTFExchange.Side.Sell, amount, price, 961);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, 200 ether, price, 962);
+
+    MyriadCTFExchange.Order[] memory makers = new MyriadCTFExchange.Order[](2);
+    makers[0] = m1;
+    makers[1] = m2;
+    bytes[] memory makerSigs = new bytes[](2);
+    makerSigs[0] = _signOrder(m1, makerPk);
+    makerSigs[1] = _signOrder(m2, maker2Pk);
+    uint256[] memory fills = new uint256[](2);
+    fills[0] = amount;
+    fills[1] = amount;
+
+    exchange.matchMultipleOrdersWithFees(makers, makerSigs, fills, t, _signOrder(t, takerPk));
+
+    uint256 feeModuleAfter = collateral.balanceOf(address(feeModule));
+    uint256 notionalPerFill = (amount * price) / ONE;
+    uint256 expectedFees = 2 * ((notionalPerFill * 100) / BPS + (notionalPerFill * 200) / BPS);
+    assertEq(feeModuleAfter - feeModuleBefore, expectedFees);
+  }
+
+  function testMatchMultipleNotOperatorReverts() public {
+    uint256 price = (60 * ONE) / 100;
+    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Sell, 100 ether, price, 970);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, 100 ether, price, 971);
+
+    MyriadCTFExchange.Order[] memory makers = new MyriadCTFExchange.Order[](1);
+    makers[0] = m;
+    bytes[] memory makerSigs = new bytes[](1);
+    makerSigs[0] = _signOrder(m, makerPk);
+    uint256[] memory fills = new uint256[](1);
+    fills[0] = 100 ether;
+    bytes memory takerSig = _signOrder(t, takerPk);
+
+    vm.prank(taker);
+    vm.expectRevert("not operator");
+    exchange.matchMultipleOrdersWithFees(makers, makerSigs, fills, t, takerSig);
+  }
+
+  function testMatchMultipleMergeMatch() public {
+    uint256 amount = 100 ether;
+    uint256 makerPrice = (60 * ONE) / 100;
+    uint256 takerPrice = (40 * ONE) / 100;
+
+    collateral.mint(maker, 2000 ether);
+    collateral.mint(taker, 2000 ether);
+
+    vm.startPrank(maker);
+    collateral.approve(address(conditionalTokens), type(uint256).max);
+    conditionalTokens.setApprovalForAll(address(exchange), true);
+    conditionalTokens.splitPosition(marketId, amount);
+    vm.stopPrank();
+
+    vm.startPrank(taker);
+    collateral.approve(address(conditionalTokens), type(uint256).max);
+    conditionalTokens.setApprovalForAll(address(exchange), true);
+    conditionalTokens.splitPosition(marketId, amount);
+    vm.stopPrank();
+
+    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Sell, amount, makerPrice, 4000);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Sell, amount, takerPrice, 4001);
+
+    MyriadCTFExchange.Order[] memory makers = new MyriadCTFExchange.Order[](1);
+    makers[0] = m;
+    bytes[] memory makerSigs = new bytes[](1);
+    makerSigs[0] = _signOrder(m, makerPk);
+    uint256[] memory fills = new uint256[](1);
+    fills[0] = amount;
+
+    uint256 makerColBefore = collateral.balanceOf(maker);
+    uint256 takerColBefore = collateral.balanceOf(taker);
+
+    exchange.matchMultipleOrdersWithFees(makers, makerSigs, fills, t, _signOrder(t, takerPk));
+
+    uint256 tokenId0 = conditionalTokens.getTokenId(marketId, Outcomes.YES);
+    uint256 tokenId1 = conditionalTokens.getTokenId(marketId, Outcomes.NO);
+    assertEq(conditionalTokens.balanceOf(maker, tokenId0), 0);
+    assertEq(conditionalTokens.balanceOf(taker, tokenId1), 0);
+
+    uint256 makerNotional = (amount * makerPrice) / ONE;
+    uint256 takerNotional = amount - makerNotional;
+    uint256 makerFee = (makerNotional * 100) / BPS;
+    uint256 takerFee = (takerNotional * 200) / BPS;
+
+    assertEq(collateral.balanceOf(maker), makerColBefore + makerNotional - makerFee);
+    assertEq(collateral.balanceOf(taker), takerColBefore + takerNotional - takerFee);
+
+    assertEq(exchange.filledAmounts(exchange.hashOrder(m)), amount);
+    assertEq(exchange.filledAmounts(exchange.hashOrder(t)), amount);
+  }
+
+  function testMatchMultipleDustRemainderMakerReverts() public {
+    exchange.setMinOrderAmount(50 ether);
+
+    uint256 price = (60 * ONE) / 100;
+
+    collateral.mint(maker, 1000 ether);
+    collateral.mint(taker, 1000 ether);
+
+    vm.startPrank(maker);
+    collateral.approve(address(conditionalTokens), type(uint256).max);
+    conditionalTokens.splitPosition(marketId, 100 ether);
+    conditionalTokens.setApprovalForAll(address(exchange), true);
+    vm.stopPrank();
+    vm.prank(taker);
+    collateral.approve(address(exchange), type(uint256).max);
+
+    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Sell, 100 ether, price, 4100);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, 100 ether, price, 4101);
+
+    MyriadCTFExchange.Order[] memory makers = new MyriadCTFExchange.Order[](1);
+    makers[0] = m;
+    bytes[] memory makerSigs = new bytes[](1);
+    makerSigs[0] = _signOrder(m, makerPk);
+    uint256[] memory fills = new uint256[](1);
+    fills[0] = 60 ether;
+    bytes memory takerSig = _signOrder(t, takerPk);
+
+    vm.expectRevert("maker dust remainder");
+    exchange.matchMultipleOrdersWithFees(makers, makerSigs, fills, t, takerSig);
+  }
+
+  function testMatchMultipleDustRemainderTakerReverts() public {
+    exchange.setMinOrderAmount(50 ether);
+
+    uint256 price = (60 * ONE) / 100;
+
+    collateral.mint(maker, 1000 ether);
+    collateral.mint(maker2, 1000 ether);
+    collateral.mint(taker, 1000 ether);
+
+    vm.startPrank(maker);
+    collateral.approve(address(conditionalTokens), type(uint256).max);
+    conditionalTokens.splitPosition(marketId, 100 ether);
+    conditionalTokens.setApprovalForAll(address(exchange), true);
+    vm.stopPrank();
+    vm.startPrank(maker2);
+    collateral.approve(address(conditionalTokens), type(uint256).max);
+    conditionalTokens.splitPosition(marketId, 100 ether);
+    conditionalTokens.setApprovalForAll(address(exchange), true);
+    vm.stopPrank();
+    vm.prank(taker);
+    collateral.approve(address(exchange), type(uint256).max);
+
+    MyriadCTFExchange.Order memory m1 = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Sell, 100 ether, price, 4110);
+    MyriadCTFExchange.Order memory m2 = _buildOrder(maker2, marketId, Outcomes.YES, MyriadCTFExchange.Side.Sell, 100 ether, price, 4111);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, 100 ether, price, 4112);
+
+    MyriadCTFExchange.Order[] memory makers = new MyriadCTFExchange.Order[](2);
+    makers[0] = m1;
+    makers[1] = m2;
+    bytes[] memory makerSigs = new bytes[](2);
+    makerSigs[0] = _signOrder(m1, makerPk);
+    makerSigs[1] = _signOrder(m2, maker2Pk);
+    uint256[] memory fills = new uint256[](2);
+    fills[0] = 30 ether;
+    fills[1] = 30 ether;
+    bytes memory takerSig = _signOrder(t, takerPk);
+
+    vm.expectRevert("taker dust remainder");
+    exchange.matchMultipleOrdersWithFees(makers, makerSigs, fills, t, takerSig);
+  }
+
+  function testMatchMultiplePrefilledMaker() public {
+    uint256 price = (60 * ONE) / 100;
+
+    collateral.mint(maker, 2000 ether);
+    collateral.mint(maker2, 1000 ether);
+    collateral.mint(taker, 3000 ether);
+
+    vm.startPrank(maker);
+    collateral.approve(address(conditionalTokens), type(uint256).max);
+    conditionalTokens.splitPosition(marketId, 200 ether);
+    conditionalTokens.setApprovalForAll(address(exchange), true);
+    vm.stopPrank();
+    vm.startPrank(maker2);
+    collateral.approve(address(conditionalTokens), type(uint256).max);
+    conditionalTokens.splitPosition(marketId, 100 ether);
+    conditionalTokens.setApprovalForAll(address(exchange), true);
+    vm.stopPrank();
+    vm.prank(taker);
+    collateral.approve(address(exchange), type(uint256).max);
+
+    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Sell, 200 ether, price, 4200);
+    MyriadCTFExchange.Order memory t1 = _buildOrder(taker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, 50 ether, price, 4201);
+
+    exchange.matchOrdersWithFees(m, _signOrder(m, makerPk), t1, _signOrder(t1, takerPk), 50 ether);
+    assertEq(exchange.filledAmounts(exchange.hashOrder(m)), 50 ether);
+
+    MyriadCTFExchange.Order memory m2 = _buildOrder(maker2, marketId, Outcomes.YES, MyriadCTFExchange.Side.Sell, 100 ether, price, 4202);
+    MyriadCTFExchange.Order memory t2 = _buildOrder(taker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, 100 ether, price, 4203);
+
+    MyriadCTFExchange.Order[] memory makers = new MyriadCTFExchange.Order[](2);
+    makers[0] = m;
+    makers[1] = m2;
+    bytes[] memory makerSigs = new bytes[](2);
+    makerSigs[0] = _signOrder(m, makerPk);
+    makerSigs[1] = _signOrder(m2, maker2Pk);
+    uint256[] memory fills = new uint256[](2);
+    fills[0] = 50 ether;
+    fills[1] = 50 ether;
+
+    exchange.matchMultipleOrdersWithFees(makers, makerSigs, fills, t2, _signOrder(t2, takerPk));
+
+    assertEq(exchange.filledAmounts(exchange.hashOrder(m)), 100 ether);
+    assertEq(exchange.filledAmounts(exchange.hashOrder(m2)), 50 ether);
+    assertEq(exchange.filledAmounts(exchange.hashOrder(t2)), 100 ether);
+  }
+
+  function testMatchMultipleInsufficientCollateralReverts() public {
+    uint256 amount = 100 ether;
+    uint256 price = (60 * ONE) / 100;
+
+    collateral.mint(maker, 1000 ether);
+
+    vm.startPrank(maker);
+    collateral.approve(address(conditionalTokens), type(uint256).max);
+    conditionalTokens.splitPosition(marketId, amount);
+    conditionalTokens.setApprovalForAll(address(exchange), true);
+    vm.stopPrank();
+    vm.prank(taker);
+    collateral.approve(address(exchange), type(uint256).max);
+
+    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Sell, amount, price, 4300);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, price, 4301);
+
+    MyriadCTFExchange.Order[] memory makers = new MyriadCTFExchange.Order[](1);
+    makers[0] = m;
+    bytes[] memory makerSigs = new bytes[](1);
+    makerSigs[0] = _signOrder(m, makerPk);
+    uint256[] memory fills = new uint256[](1);
+    fills[0] = amount;
+    bytes memory takerSig = _signOrder(t, takerPk);
+
+    vm.expectRevert("insufficient collateral");
+    exchange.matchMultipleOrdersWithFees(makers, makerSigs, fills, t, takerSig);
+  }
+
+  function testMatchMultipleInsufficientTokensReverts() public {
+    uint256 amount = 100 ether;
+    uint256 price = (60 * ONE) / 100;
+
+    collateral.mint(taker, 1000 ether);
+
+    vm.prank(taker);
+    collateral.approve(address(exchange), type(uint256).max);
+
+    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Sell, amount, price, 4400);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, price, 4401);
+
+    MyriadCTFExchange.Order[] memory makers = new MyriadCTFExchange.Order[](1);
+    makers[0] = m;
+    bytes[] memory makerSigs = new bytes[](1);
+    makerSigs[0] = _signOrder(m, makerPk);
+    uint256[] memory fills = new uint256[](1);
+    fills[0] = amount;
+    bytes memory takerSig = _signOrder(t, takerPk);
+
+    vm.expectRevert("insufficient tokens");
+    exchange.matchMultipleOrdersWithFees(makers, makerSigs, fills, t, takerSig);
+  }
+
+  // =========================================================================
+  // CEI ordering: matchMultipleOrdersWithFees taker state
+  // =========================================================================
+
+  function testMatchMultipleTakerOverfillRollsBack() public {
+    uint256 price = (60 * ONE) / 100;
+
+    collateral.mint(maker, 2000 ether);
+    collateral.mint(maker2, 2000 ether);
+    collateral.mint(taker, 2000 ether);
+
+    vm.prank(maker);
+    collateral.approve(address(exchange), type(uint256).max);
+    vm.prank(maker2);
+    collateral.approve(address(exchange), type(uint256).max);
+    vm.prank(taker);
+    collateral.approve(address(exchange), type(uint256).max);
+
+    MyriadCTFExchange.Order memory m1 = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, 100 ether, price, 4500);
+    MyriadCTFExchange.Order memory m2 = _buildOrder(maker2, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, 100 ether, price, 4501);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Buy, 120 ether, (40 * ONE) / 100, 4502);
+
+    MyriadCTFExchange.Order[] memory makers = new MyriadCTFExchange.Order[](2);
+    makers[0] = m1;
+    makers[1] = m2;
+    bytes[] memory makerSigs = new bytes[](2);
+    makerSigs[0] = _signOrder(m1, makerPk);
+    makerSigs[1] = _signOrder(m2, maker2Pk);
+    uint256[] memory fills = new uint256[](2);
+    fills[0] = 80 ether;
+    fills[1] = 60 ether;
+    bytes memory tSig = _signOrder(t, takerPk);
+    bytes32 tHash = exchange.hashOrder(t);
+    bytes32 m1Hash = exchange.hashOrder(m1);
+    bytes32 m2Hash = exchange.hashOrder(m2);
+
+    vm.expectRevert("taker overfill");
+    exchange.matchMultipleOrdersWithFees(makers, makerSigs, fills, t, tSig);
+
+    assertEq(exchange.filledAmounts(tHash), 0, "taker fill rolled back");
+    assertEq(exchange.filledAmounts(m1Hash), 0, "maker1 fill rolled back");
+    assertEq(exchange.filledAmounts(m2Hash), 0, "maker2 fill rolled back");
+  }
+
+  function testMatchMultipleTakerDustRollsBack() public {
+    exchange.setMinOrderAmount(50 ether);
+    uint256 price = (60 * ONE) / 100;
+
+    collateral.mint(maker, 2000 ether);
+    collateral.mint(maker2, 2000 ether);
+    collateral.mint(taker, 2000 ether);
+
+    vm.prank(maker);
+    collateral.approve(address(exchange), type(uint256).max);
+    vm.prank(maker2);
+    collateral.approve(address(exchange), type(uint256).max);
+    vm.prank(taker);
+    collateral.approve(address(exchange), type(uint256).max);
+
+    MyriadCTFExchange.Order memory m1 = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, 200 ether, price, 4510);
+    MyriadCTFExchange.Order memory m2 = _buildOrder(maker2, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, 200 ether, price, 4511);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Buy, 200 ether, (40 * ONE) / 100, 4512);
+
+    MyriadCTFExchange.Order[] memory makers = new MyriadCTFExchange.Order[](2);
+    makers[0] = m1;
+    makers[1] = m2;
+    bytes[] memory makerSigs = new bytes[](2);
+    makerSigs[0] = _signOrder(m1, makerPk);
+    makerSigs[1] = _signOrder(m2, maker2Pk);
+    uint256[] memory fills = new uint256[](2);
+    fills[0] = 80 ether;
+    fills[1] = 90 ether;
+    bytes memory tSig = _signOrder(t, takerPk);
+    bytes32 tHash = exchange.hashOrder(t);
+    bytes32 m1Hash = exchange.hashOrder(m1);
+    bytes32 m2Hash = exchange.hashOrder(m2);
+
+    vm.expectRevert("taker dust remainder");
+    exchange.matchMultipleOrdersWithFees(makers, makerSigs, fills, t, tSig);
+
+    assertEq(exchange.filledAmounts(tHash), 0, "taker fill rolled back on dust");
+    assertEq(exchange.filledAmounts(m1Hash), 0, "maker1 fill rolled back on dust");
+    assertEq(exchange.filledAmounts(m2Hash), 0, "maker2 fill rolled back on dust");
+  }
+
+  function testMatchMultipleSettlementRevertRollsBackAll() public {
+    uint256 price = (60 * ONE) / 100;
+
+    collateral.mint(maker, 1000 ether);
+    collateral.mint(taker, 1000 ether);
+
+    vm.prank(maker);
+    collateral.approve(address(conditionalTokens), type(uint256).max);
+    vm.prank(maker);
+    conditionalTokens.splitPosition(marketId, 100 ether);
+    vm.prank(maker);
+    conditionalTokens.setApprovalForAll(address(exchange), true);
+    vm.prank(taker);
+    collateral.approve(address(exchange), type(uint256).max);
+
+    MyriadCTFExchange.Order memory m1 = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Sell, 100 ether, price, 4520);
+    MyriadCTFExchange.Order memory m2 = _buildOrder(maker2, marketId, Outcomes.YES, MyriadCTFExchange.Side.Sell, 100 ether, price, 4521);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, 200 ether, price, 4522);
+
+    MyriadCTFExchange.Order[] memory makers = new MyriadCTFExchange.Order[](2);
+    makers[0] = m1;
+    makers[1] = m2;
+    bytes[] memory makerSigs = new bytes[](2);
+    makerSigs[0] = _signOrder(m1, makerPk);
+    makerSigs[1] = _signOrder(m2, maker2Pk);
+    uint256[] memory fills = new uint256[](2);
+    fills[0] = 100 ether;
+    fills[1] = 100 ether;
+    bytes memory tSig = _signOrder(t, takerPk);
+    bytes32 tHash = exchange.hashOrder(t);
+    bytes32 m1Hash = exchange.hashOrder(m1);
+
+    vm.expectRevert("insufficient tokens");
+    exchange.matchMultipleOrdersWithFees(makers, makerSigs, fills, t, tSig);
+
+    assertEq(exchange.filledAmounts(tHash), 0, "taker fill rolled back");
+    assertEq(exchange.filledAmounts(m1Hash), 0, "maker1 fill rolled back");
+  }
+
+  function testMatchMultiplePartialThenOverfillReverts() public {
+    uint256 price = (60 * ONE) / 100;
+
+    collateral.mint(maker, 2000 ether);
+    collateral.mint(maker2, 2000 ether);
+    collateral.mint(taker, 2000 ether);
+
+    vm.prank(maker);
+    collateral.approve(address(exchange), type(uint256).max);
+    vm.prank(maker2);
+    collateral.approve(address(exchange), type(uint256).max);
+    vm.prank(taker);
+    collateral.approve(address(exchange), type(uint256).max);
+
+    MyriadCTFExchange.Order memory m1 = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, 200 ether, price, 4530);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Buy, 100 ether, (40 * ONE) / 100, 4531);
+
+    bytes memory m1Sig = _signOrder(m1, makerPk);
+    bytes memory tSig = _signOrder(t, takerPk);
+    bytes32 tHash = exchange.hashOrder(t);
+
+    exchange.matchOrdersWithFees(m1, m1Sig, t, tSig, 60 ether);
+    assertEq(exchange.filledAmounts(tHash), 60 ether);
+
+    MyriadCTFExchange.Order memory m2 = _buildOrder(maker2, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, 100 ether, price, 4532);
+    bytes memory m2Sig = _signOrder(m2, maker2Pk);
+    bytes32 m2Hash = exchange.hashOrder(m2);
+
+    MyriadCTFExchange.Order[] memory makers = new MyriadCTFExchange.Order[](1);
+    makers[0] = m2;
+    bytes[] memory makerSigs = new bytes[](1);
+    makerSigs[0] = m2Sig;
+    uint256[] memory fills = new uint256[](1);
+    fills[0] = 50 ether;
+
+    vm.expectRevert("taker overfill");
+    exchange.matchMultipleOrdersWithFees(makers, makerSigs, fills, t, tSig);
+
+    assertEq(exchange.filledAmounts(tHash), 60 ether, "taker fill unchanged after batch revert");
+    assertEq(exchange.filledAmounts(m2Hash), 0, "maker2 fill unchanged after batch revert");
   }
 
   // =========================================================================
@@ -1521,8 +2488,8 @@ contract PredictionMarketCLOBTest is Test {
     vm.prank(taker);
     collateral.approve(address(exchange), type(uint256).max);
 
-    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Sell, amount, price, 3001);
-    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, price, 3002);
+    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Sell, amount, price, 3001);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, price, 3002);
 
     bytes memory mSig = _signOrder(m, makerPk);
     bytes memory tSig = _signOrder(t, takerPk);
@@ -1538,13 +2505,11 @@ contract PredictionMarketCLOBTest is Test {
     collateral.mint(taker, 1000 ether);
     // maker is selling but has NO tokens
 
-    vm.prank(maker);
-    conditionalTokens.setApprovalForAll(address(exchange), true);
     vm.prank(taker);
     collateral.approve(address(exchange), type(uint256).max);
 
-    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Sell, amount, price, 3003);
-    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, price, 3004);
+    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Sell, amount, price, 3003);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, price, 3004);
 
     bytes memory mSig = _signOrder(m, makerPk);
     bytes memory tSig = _signOrder(t, takerPk);
@@ -1567,8 +2532,8 @@ contract PredictionMarketCLOBTest is Test {
     vm.stopPrank();
     // taker has collateral but NO allowance to exchange
 
-    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Sell, amount, price, 3005);
-    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, price, 3006);
+    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Sell, amount, price, 3005);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, price, 3006);
 
     bytes memory mSig = _signOrder(m, makerPk);
     bytes memory tSig = _signOrder(t, takerPk);
@@ -1589,8 +2554,8 @@ contract PredictionMarketCLOBTest is Test {
     vm.prank(taker);
     collateral.approve(address(exchange), type(uint256).max);
 
-    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, price, 3007);
-    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, amount, ONE - price, 3008);
+    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, price, 3007);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Buy, amount, ONE - price, 3008);
 
     bytes memory mSig = _signOrder(m, makerPk);
     bytes memory tSig = _signOrder(t, takerPk);
@@ -1613,8 +2578,8 @@ contract PredictionMarketCLOBTest is Test {
     vm.prank(taker);
     conditionalTokens.setApprovalForAll(address(exchange), true);
 
-    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Sell, amount, price, 3009);
-    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Sell, amount, ONE - price, 3010);
+    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Sell, amount, price, 3009);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Sell, amount, ONE - price, 3010);
 
     bytes memory mSig = _signOrder(m, makerPk);
     bytes memory tSig = _signOrder(t, takerPk);
@@ -1638,8 +2603,8 @@ contract PredictionMarketCLOBTest is Test {
     vm.prank(taker);
     collateral.approve(address(exchange), type(uint256).max);
 
-    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Sell, amount, price, 3011);
-    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, 0, MyriadCTFExchange.Side.Buy, amount, price, 3012);
+    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Sell, amount, price, 3011);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, amount, price, 3012);
 
     bytes memory mSig = _signOrder(m, makerPk);
     bytes memory tSig = _signOrder(t, takerPk);
@@ -1688,8 +2653,8 @@ contract PredictionMarketCLOBTest is Test {
     collateral.approve(address(exchange), type(uint256).max);
 
     uint256 price = (50 * ONE) / 100;
-    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, 5 ether, price, 2001);
-    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, 5 ether, price, 2002);
+    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, 5 ether, price, 2001);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Buy, 5 ether, price, 2002);
 
     bytes memory mSig = _signOrder(m, makerPk);
     bytes memory tSig = _signOrder(t, takerPk);
@@ -1709,8 +2674,8 @@ contract PredictionMarketCLOBTest is Test {
     collateral.approve(address(exchange), type(uint256).max);
 
     uint256 price = (50 * ONE) / 100;
-    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, 20 ether, price, 2003);
-    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, 20 ether, price, 2004);
+    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, 20 ether, price, 2003);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Buy, 20 ether, price, 2004);
 
     exchange.matchOrdersWithFees(m, _signOrder(m, makerPk), t, _signOrder(t, takerPk), 20 ether);
 
@@ -1730,8 +2695,8 @@ contract PredictionMarketCLOBTest is Test {
 
     uint256 price = (50 * ONE) / 100;
     // maker has 25 ether order, fill 20 => remaining 5 < minOrderAmount(10)
-    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, 25 ether, price, 2005);
-    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, 20 ether, price, 2006);
+    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, 25 ether, price, 2005);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Buy, 20 ether, price, 2006);
 
     bytes memory mSig_ = _signOrder(m, makerPk);
     bytes memory tSig_ = _signOrder(t, takerPk);
@@ -1752,8 +2717,8 @@ contract PredictionMarketCLOBTest is Test {
 
     uint256 price = (50 * ONE) / 100;
     // taker has 25 ether order, fill 20 => remaining 5 < minOrderAmount(10)
-    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, 20 ether, price, 2007);
-    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, 25 ether, price, 2008);
+    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, 20 ether, price, 2007);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Buy, 25 ether, price, 2008);
 
     bytes memory mSig_ = _signOrder(m, makerPk);
     bytes memory tSig_ = _signOrder(t, takerPk);
@@ -1774,8 +2739,8 @@ contract PredictionMarketCLOBTest is Test {
 
     uint256 price = (50 * ONE) / 100;
     // maker has 30 ether, fill 20 => remaining 10 == minOrderAmount, should pass
-    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, 30 ether, price, 2009);
-    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, 20 ether, price, 2010);
+    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, 30 ether, price, 2009);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Buy, 20 ether, price, 2010);
 
     exchange.matchOrdersWithFees(m, _signOrder(m, makerPk), t, _signOrder(t, takerPk), 20 ether);
 
@@ -1795,8 +2760,8 @@ contract PredictionMarketCLOBTest is Test {
 
     uint256 price = (50 * ONE) / 100;
     // fill exactly 20 ether on 20 ether order => remaining 0, always allowed
-    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, 20 ether, price, 2011);
-    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, 20 ether, price, 2012);
+    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, 20 ether, price, 2011);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Buy, 20 ether, price, 2012);
 
     exchange.matchOrdersWithFees(m, _signOrder(m, makerPk), t, _signOrder(t, takerPk), 20 ether);
 
@@ -1815,13 +2780,107 @@ contract PredictionMarketCLOBTest is Test {
 
     uint256 price = (50 * ONE) / 100;
     // fill 1 ether on 100 ether order => small remainder, should work since minOrderAmount == 0
-    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, 0, MyriadCTFExchange.Side.Buy, 100 ether, price, 2013);
-    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, 1, MyriadCTFExchange.Side.Buy, 100 ether, price, 2014);
+    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, 100 ether, price, 2013);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Buy, 100 ether, price, 2014);
 
     exchange.matchOrdersWithFees(m, _signOrder(m, makerPk), t, _signOrder(t, takerPk), 1 ether);
 
     bytes32 mHash = exchange.hashOrder(m);
     assertEq(exchange.filledAmounts(mHash), 1 ether);
+  }
+
+  // =========================================================================
+  // CEI ordering: taker state written before settlement
+  // =========================================================================
+
+  function testTakerDustRevertPreventsSettlement() public {
+    exchange.setMinOrderAmount(50 ether);
+    uint256 price = (60 * ONE) / 100;
+
+    collateral.mint(maker, 1000 ether);
+    collateral.mint(taker, 1000 ether);
+
+    vm.startPrank(maker);
+    collateral.approve(address(conditionalTokens), type(uint256).max);
+    conditionalTokens.splitPosition(marketId, 100 ether);
+    conditionalTokens.setApprovalForAll(address(exchange), true);
+    vm.stopPrank();
+    vm.prank(taker);
+    collateral.approve(address(exchange), type(uint256).max);
+
+    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Sell, 100 ether, price, 3000);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, 100 ether, price, 3001);
+
+    bytes memory mSig = _signOrder(m, makerPk);
+    bytes memory tSig = _signOrder(t, takerPk);
+    uint256 yesTokenId = conditionalTokens.getTokenId(marketId, Outcomes.YES);
+    bytes32 mHash = exchange.hashOrder(m);
+    bytes32 tHash = exchange.hashOrder(t);
+
+    uint256 makerTokensBefore = conditionalTokens.balanceOf(maker, yesTokenId);
+    uint256 takerColBefore = collateral.balanceOf(taker);
+
+    vm.expectRevert("taker dust remainder");
+    exchange.matchOrdersWithFees(m, mSig, t, tSig, 60 ether);
+
+    assertEq(conditionalTokens.balanceOf(maker, yesTokenId), makerTokensBefore, "maker tokens unchanged");
+    assertEq(collateral.balanceOf(taker), takerColBefore, "taker collateral unchanged");
+    assertEq(exchange.filledAmounts(mHash), 0, "maker fill unchanged");
+    assertEq(exchange.filledAmounts(tHash), 0, "taker fill unchanged");
+  }
+
+  function testTakerOverfillRevertPreventsSettlement() public {
+    uint256 price = (60 * ONE) / 100;
+    uint256 complementPrice = (40 * ONE) / 100;
+
+    collateral.mint(maker, 2000 ether);
+    collateral.mint(taker, 2000 ether);
+
+    vm.prank(maker);
+    collateral.approve(address(exchange), type(uint256).max);
+    vm.prank(taker);
+    collateral.approve(address(exchange), type(uint256).max);
+
+    MyriadCTFExchange.Order memory m1 = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, 100 ether, price, 3010);
+    MyriadCTFExchange.Order memory t1 = _buildOrder(taker, marketId, Outcomes.NO, MyriadCTFExchange.Side.Buy, 50 ether, complementPrice, 3011);
+
+    bytes memory m1Sig = _signOrder(m1, makerPk);
+    bytes memory t1Sig = _signOrder(t1, takerPk);
+    bytes32 m1Hash = exchange.hashOrder(m1);
+    bytes32 t1Hash = exchange.hashOrder(t1);
+
+    exchange.matchOrdersWithFees(m1, m1Sig, t1, t1Sig, 50 ether);
+    assertEq(exchange.filledAmounts(t1Hash), 50 ether);
+
+    uint256 makerColBefore = collateral.balanceOf(maker);
+
+    vm.expectRevert("taker overfill");
+    exchange.matchOrdersWithFees(m1, m1Sig, t1, t1Sig, 10 ether);
+
+    assertEq(collateral.balanceOf(maker), makerColBefore, "maker collateral unchanged after revert");
+    assertEq(exchange.filledAmounts(m1Hash), 50 ether, "maker fill unchanged after revert");
+  }
+
+  function testSettlementRevertRollsBackTakerFill() public {
+    uint256 price = (60 * ONE) / 100;
+
+    collateral.mint(taker, 1000 ether);
+    vm.prank(taker);
+    collateral.approve(address(exchange), type(uint256).max);
+
+    MyriadCTFExchange.Order memory m = _buildOrder(maker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Sell, 100 ether, price, 3020);
+    MyriadCTFExchange.Order memory t = _buildOrder(taker, marketId, Outcomes.YES, MyriadCTFExchange.Side.Buy, 100 ether, price, 3021);
+
+    bytes memory mSig = _signOrder(m, makerPk);
+    bytes memory tSig = _signOrder(t, takerPk);
+    bytes32 mHash = exchange.hashOrder(m);
+    bytes32 tHash = exchange.hashOrder(t);
+
+    vm.expectRevert("insufficient tokens");
+    exchange.matchOrdersWithFees(m, mSig, t, tSig, 50 ether);
+
+    assertEq(exchange.filledAmounts(tHash), 0, "taker fill rolled back");
+    assertEq(exchange.filledAmounts(mHash), 0, "maker fill rolled back");
   }
 
   // =========================================================================
@@ -1831,7 +2890,7 @@ contract PredictionMarketCLOBTest is Test {
   function _buildOrder(
     address trader,
     uint256 marketId_,
-    uint8 outcome,
+    uint256 outcome,
     MyriadCTFExchange.Side side,
     uint256 amount,
     uint256 price,
@@ -1841,7 +2900,7 @@ contract PredictionMarketCLOBTest is Test {
       MyriadCTFExchange.Order({
         trader: trader,
         marketId: marketId_,
-        outcomeId: outcome,
+        outcomeId: uint8(outcome),
         side: side,
         amount: amount,
         price: price,
@@ -1854,7 +2913,7 @@ contract PredictionMarketCLOBTest is Test {
   function _buildOrderWithMinFill(
     address trader,
     uint256 marketId_,
-    uint8 outcome,
+    uint256 outcome,
     MyriadCTFExchange.Side side,
     uint256 amount,
     uint256 price,
@@ -1865,7 +2924,7 @@ contract PredictionMarketCLOBTest is Test {
       MyriadCTFExchange.Order({
         trader: trader,
         marketId: marketId_,
-        outcomeId: outcome,
+        outcomeId: uint8(outcome),
         side: side,
         amount: amount,
         price: price,
