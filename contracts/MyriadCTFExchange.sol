@@ -201,37 +201,37 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
   }
 
   function _authorizeUpgrade(address) internal view override {
-    if (!registry.hasRole(registry.DEFAULT_ADMIN_ROLE(), msg.sender)) revert NotAdmin();
+    _requireAdmin();
   }
 
   // ─── Emergency controls ───────────────────────────────────────────────
 
   function pause() external {
-    if (!registry.hasRole(registry.DEFAULT_ADMIN_ROLE(), msg.sender)) revert NotAdmin();
+    _requireAdmin();
     _pause();
   }
 
   function unpause() external {
-    if (!registry.hasRole(registry.DEFAULT_ADMIN_ROLE(), msg.sender)) revert NotAdmin();
+    _requireAdmin();
     _unpause();
   }
 
   function setNegRiskAdapter(address _adapter) external {
-    if (!registry.hasRole(registry.DEFAULT_ADMIN_ROLE(), msg.sender)) revert NotAdmin();
+    _requireAdmin();
     address old = negRiskAdapter;
     negRiskAdapter = _adapter;
     emit NegRiskAdapterUpdated(old, _adapter);
   }
 
   function setCallbackGasLimit(uint256 _limit) external {
-    if (!registry.hasRole(registry.DEFAULT_ADMIN_ROLE(), msg.sender)) revert NotAdmin();
+    _requireAdmin();
     if (_limit < 50_000) revert LimitTooLow();
     emit CallbackGasLimitUpdated(callbackGasLimit, _limit);
     callbackGasLimit = _limit;
   }
 
   function setMinOrderAmount(uint256 _amount) external {
-    if (!registry.hasRole(registry.DEFAULT_ADMIN_ROLE(), msg.sender)) revert NotAdmin();
+    _requireAdmin();
     uint256 old = minOrderAmount;
     minOrderAmount = _amount;
     emit MinOrderAmountUpdated(old, _amount);
@@ -240,13 +240,14 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
   // ─── Order management ────────────────────────────────────────────────
 
   function cancelOrders(Order[] calldata orders) external {
-    for (uint256 i = 0; i < orders.length; i++) {
+    for (uint256 i = 0; i < orders.length;) {
       Order calldata order = orders[i];
       if (order.trader != msg.sender) revert NotTrader();
       bytes32 orderHash = hashOrder(order);
       if (orderInvalidated[orderHash]) revert AlreadyCancelled();
       orderInvalidated[orderHash] = true;
       emit OrderCancelled(orderHash, msg.sender);
+      unchecked { ++i; }
     }
   }
 
@@ -262,7 +263,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
     bytes calldata takerSig,
     uint256 fillAmount
   ) external whenNotPaused nonReentrant {
-    if (!registry.hasRole(registry.OPERATOR_ROLE(), msg.sender)) revert NotOperator();
+    _requireOperator();
     if (maker.marketId != taker.marketId) revert MarketMismatch();
 
     IFeeModule _feeModule = IFeeModule(feeModule);
@@ -299,7 +300,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
     Order calldata taker,
     bytes calldata takerSig
   ) external whenNotPaused nonReentrant {
-    if (!registry.hasRole(registry.OPERATOR_ROLE(), msg.sender)) revert NotOperator();
+    _requireOperator();
     uint256 n = makers.length;
     if (n == 0) revert NoMakers();
     if (makerSigs.length != n) revert SigCount();
@@ -313,7 +314,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
     uint256 totalFees;
     uint256 takerFilledBefore = filledAmounts[takerHash];
 
-    for (uint256 i = 0; i < n; i++) {
+    for (uint256 i = 0; i < n;) {
       if (makers[i].marketId != taker.marketId) revert MarketMismatch();
 
       FeeConfig memory feeConfig;
@@ -332,6 +333,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
       );
 
       totalFees += makerFee + takerFee;
+      unchecked { ++i; }
     }
 
     uint256 takerFilledAfter = takerFilledBefore + totalTakerFill;
@@ -363,7 +365,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
     bytes[] calldata signatures,
     uint256 fillAmount
   ) external whenNotPaused nonReentrant {
-    if (!registry.hasRole(registry.OPERATOR_ROLE(), msg.sender)) revert NotOperator();
+    _requireOperator();
 
     address _adapter = negRiskAdapter;
     if (_adapter == address(0)) revert NoAdapter();
@@ -388,7 +390,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
     bytes32[] memory orderHashes = new bytes32[](orders.length);
     uint256[] memory currentFilled = new uint256[](orders.length);
 
-    for (uint256 i = 0; i < orders.length; i++) {
+    for (uint256 i = 0; i < orders.length;) {
       Order calldata order = orders[i];
       if (order.side != Side.Buy) revert NotBuy();
       if (order.outcomeId != Outcomes.YES) revert NotYes();
@@ -405,11 +407,13 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
       if (currentFilled[i] + fillAmount > order.amount) revert Overfill();
       if (order.minFillAmount != 0 && fillAmount < order.minFillAmount) revert BelowMinFill();
 
-      for (uint256 j = 0; j < i; j++) {
+      for (uint256 j = 0; j < i;) {
         if (order.marketId == orders[j].marketId) revert DuplicateMarket();
+        unchecked { ++j; }
       }
 
       priceSum += order.price;
+      unchecked { ++i; }
     }
 
     if (priceSum < ONE) revert PriceSumBelowOne();
@@ -421,7 +425,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
     uint256 takerIdx = orders.length - 1;
 
     uint256 totalNotional;
-    for (uint256 i = 0; i < orders.length; i++) {
+    for (uint256 i = 0; i < orders.length;) {
       uint256 notional = (fillAmount * orders[i].price) / ONE;
       if (i == takerIdx && totalNotional + notional < fillAmount) {
         notional = fillAmount - totalNotional;
@@ -442,6 +446,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
       uint256 required = notional + fee;
       _checkCollateralBalance(orders[i].trader, collateral, required);
       collateral.safeTransferFrom(orders[i].trader, address(this), required);
+      unchecked { ++i; }
     }
 
     // Mint full fillAmount shares
@@ -449,7 +454,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
     INegRiskAdapter(_adapter).mintAllYesTokens(eventId, fillAmount, address(this));
 
     // Distribute YES tokens (fillAmount per outcome) to each buyer
-    for (uint256 i = 0; i < orders.length; i++) {
+    for (uint256 i = 0; i < orders.length;) {
       uint256 tokenId = _ct.getTokenId(orders[i].marketId, Outcomes.YES);
       _safeTransferWithGasCap(address(this), orders[i].trader, tokenId, fillAmount);
 
@@ -462,6 +467,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
       }
 
       emit CrossMarketOrderFilled(orderHashes[i], eventId, orders[i].marketId, fillAmount, newFill);
+      unchecked { ++i; }
     }
 
     // Send surplus (priceSum > ONE overage) + fees to feeModule
@@ -858,6 +864,14 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
   ) internal view {
     if (conditionalTokens.balanceOf(trader, tokenId) < required) revert InsufficientTokens();
     if (!conditionalTokens.isApprovedForAll(trader, address(this))) revert TokensNotApproved();
+  }
+
+  function _requireAdmin() internal view {
+    if (!registry.hasRole(registry.DEFAULT_ADMIN_ROLE(), msg.sender)) revert NotAdmin();
+  }
+
+  function _requireOperator() internal view {
+    if (!registry.hasRole(registry.OPERATOR_ROLE(), msg.sender)) revert NotOperator();
   }
 
   function _requireMarketOpen(uint256 marketId) internal view {
