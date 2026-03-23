@@ -210,13 +210,13 @@ contract MyriadCTFExchangeTest is Test {
 
     address nonOperator = address(0xBAD);
     vm.prank(nonOperator);
-    vm.expectRevert("not operator");
+    vm.expectRevert(MyriadCTFExchange.NotOperator.selector);
     exchange.matchOrdersWithFees(m, mSig, t, tSig, 100 ether);
   }
 
   function testSetNegRiskAdapterByNonAdminReverts() public {
     vm.prank(address(0xBAD));
-    vm.expectRevert("not admin");
+    vm.expectRevert(MyriadCTFExchange.NotAdmin.selector);
     exchange.setNegRiskAdapter(address(0x1234));
   }
 
@@ -236,7 +236,7 @@ contract MyriadCTFExchangeTest is Test {
 
   function testInitializeWithZeroManagerReverts() public {
     MyriadCTFExchange impl = new MyriadCTFExchange();
-    vm.expectRevert("manager 0");
+    vm.expectRevert(MyriadCTFExchange.ZeroManager.selector);
     new ERC1967Proxy(
       address(impl),
       abi.encodeCall(MyriadCTFExchange.initialize, (
@@ -250,8 +250,7 @@ contract MyriadCTFExchangeTest is Test {
 
   function testInitializeWithZeroConditionalTokensReverts() public {
     MyriadCTFExchange impl = new MyriadCTFExchange();
-    // "ct 0" is 4 bytes — use full Error(string) encoding to avoid bytes4 ambiguity
-    vm.expectRevert(abi.encodeWithSelector(bytes4(0x08c379a0), "ct 0"));
+    vm.expectRevert(MyriadCTFExchange.ZeroCT.selector);
     new ERC1967Proxy(
       address(impl),
       abi.encodeCall(MyriadCTFExchange.initialize, (
@@ -265,7 +264,7 @@ contract MyriadCTFExchangeTest is Test {
 
   function testInitializeWithZeroFeeModuleReverts() public {
     MyriadCTFExchange impl = new MyriadCTFExchange();
-    vm.expectRevert("fee module 0");
+    vm.expectRevert(MyriadCTFExchange.ZeroFeeModule.selector);
     new ERC1967Proxy(
       address(impl),
       abi.encodeCall(MyriadCTFExchange.initialize, (
@@ -279,7 +278,7 @@ contract MyriadCTFExchangeTest is Test {
 
   function testInitializeWithZeroRegistryReverts() public {
     MyriadCTFExchange impl = new MyriadCTFExchange();
-    vm.expectRevert("registry 0");
+    vm.expectRevert(MyriadCTFExchange.ZeroRegistry.selector);
     new ERC1967Proxy(
       address(impl),
       abi.encodeCall(MyriadCTFExchange.initialize, (
@@ -385,7 +384,7 @@ contract MyriadCTFExchangeTest is Test {
     bytes memory badSig  = _signOrder(m, thirdPk);
     bytes memory takerSig = _signOrder(t, takerPk);
 
-    vm.expectRevert("invalid signature");
+    vm.expectRevert(MyriadCTFExchange.InvalidSignature.selector);
     exchange.matchOrdersWithFees(m, badSig, t, takerSig, amount);
   }
 
@@ -403,7 +402,7 @@ contract MyriadCTFExchangeTest is Test {
     bytes memory zeroSig  = new bytes(65);
     bytes memory takerSig = _signOrder(t, takerPk);
 
-    vm.expectRevert("invalid signature");
+    vm.expectRevert(MyriadCTFExchange.InvalidSignature.selector);
     exchange.matchOrdersWithFees(m, zeroSig, t, takerSig, amount);
   }
 
@@ -416,7 +415,7 @@ contract MyriadCTFExchangeTest is Test {
     bytes memory makerSig = _signOrder(m, makerPk);
     bytes memory takerSig = _signOrder(t, takerPk);
 
-    vm.expectRevert("trader 0");
+    vm.expectRevert(MyriadCTFExchange.ZeroTrader.selector);
     exchange.matchOrdersWithFees(m, makerSig, t, takerSig, amount);
   }
 
@@ -427,7 +426,7 @@ contract MyriadCTFExchangeTest is Test {
     bytes memory makerSig = _signOrder(m, makerPk);
     bytes memory takerSig = _signOrder(t, takerPk);
 
-    vm.expectRevert("amount 0");
+    vm.expectRevert(MyriadCTFExchange.ZeroAmount.selector);
     exchange.matchOrdersWithFees(m, makerSig, t, takerSig, 100 ether);
   }
 
@@ -449,7 +448,7 @@ contract MyriadCTFExchangeTest is Test {
     bytes memory makerSig = _signOrder(m, makerPk);
     bytes memory takerSig = _signOrder(t, takerPk);
 
-    vm.expectRevert("bad outcome");
+    vm.expectRevert(MyriadCTFExchange.BadOutcome.selector);
     exchange.matchOrdersWithFees(m, makerSig, t, takerSig, 100 ether);
   }
 
@@ -479,7 +478,7 @@ contract MyriadCTFExchangeTest is Test {
 
     // Warp to exactly the expiration timestamp — order should be expired
     vm.warp(expiry);
-    vm.expectRevert("expired");
+    vm.expectRevert(MyriadCTFExchange.OrderExpired.selector);
     exchange.matchOrdersWithFees(m, makerSig, t, takerSig, 100 ether);
   }
 
@@ -542,7 +541,7 @@ contract MyriadCTFExchangeTest is Test {
     bytes memory mSig = _signOrder(m, makerPk);
     bytes memory tSig = _signOrder(t, takerPk);
 
-    vm.expectRevert("market mismatch");
+    vm.expectRevert(MyriadCTFExchange.MarketMismatch.selector);
     exchange.matchOrdersWithFees(m, mSig, t, tSig, amount);
   }
 
@@ -609,7 +608,7 @@ contract MyriadCTFExchangeTest is Test {
     bytes memory buySig  = _signOrder(buyOrder,  makerPk);
     bytes memory sellSig = _signOrder(sellOrder, takerPk);
 
-    vm.expectRevert("price mismatch");
+    vm.expectRevert(MyriadCTFExchange.PriceMismatch.selector);
     exchange.matchOrdersWithFees(buyOrder, buySig, sellOrder, sellSig, amount);
   }
 
@@ -634,7 +633,7 @@ contract MyriadCTFExchangeTest is Test {
     bytes memory buySig  = _signOrder(buyOrder,  makerPk);
     bytes memory sellSig = _signOrder(sellOrder, takerPk);
 
-    vm.expectRevert("outcome mismatch");
+    vm.expectRevert(MyriadCTFExchange.OutcomeMismatch.selector);
     exchange.matchOrdersWithFees(buyOrder, buySig, sellOrder, sellSig, amount);
   }
 
@@ -655,7 +654,7 @@ contract MyriadCTFExchangeTest is Test {
     bytes memory mSig = _signOrder(m, makerPk);
     bytes memory tSig = _signOrder(t, takerPk);
 
-    vm.expectRevert("price sum");
+    vm.expectRevert(MyriadCTFExchange.PriceSumNotOne.selector);
     exchange.matchOrdersWithFees(m, mSig, t, tSig, amount);
   }
 
@@ -680,7 +679,7 @@ contract MyriadCTFExchangeTest is Test {
     bytes memory mSig = _signOrder(m, makerPk);
     bytes memory tSig = _signOrder(t, takerPk);
 
-    vm.expectRevert("price sum");
+    vm.expectRevert(MyriadCTFExchange.PriceSumNotOne.selector);
     exchange.matchOrdersWithFees(m, mSig, t, tSig, amount);
   }
 

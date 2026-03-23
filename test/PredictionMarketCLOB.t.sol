@@ -353,7 +353,7 @@ contract PredictionMarketCLOBTest is Test {
 
     exchange.matchOrdersWithFees(makerOrder, makerSig, takerOrder, takerSig, amount);
 
-    vm.expectRevert("taker overfill");
+    vm.expectRevert(MyriadCTFExchange.TakerOverfill.selector);
     exchange.matchOrdersWithFees(makerOrder, makerSig, takerOrder, takerSig, 2 ether);
   }
 
@@ -382,7 +382,7 @@ contract PredictionMarketCLOBTest is Test {
 
     exchange.matchOrdersWithFees(makerOrder, makerSig, takerOrder, takerSig, amount);
 
-    vm.expectRevert("maker overfill");
+    vm.expectRevert(MyriadCTFExchange.MakerOverfill.selector);
     exchange.matchOrdersWithFees(makerOrder, makerSig, takerOrder, takerSig, 2 ether);
   }
 
@@ -447,7 +447,7 @@ contract PredictionMarketCLOBTest is Test {
     vm.prank(maker);
     exchange.cancelOrders(toCancel);
 
-    vm.expectRevert("invalidated");
+    vm.expectRevert(MyriadCTFExchange.OrderInvalidated.selector);
     exchange.matchOrdersWithFees(makerOrder, makerSig, takerOrder, takerSig, amount);
   }
 
@@ -482,7 +482,7 @@ contract PredictionMarketCLOBTest is Test {
     vm.prank(maker);
     exchange.cancelOrders(toCancel);
 
-    vm.expectRevert("invalidated");
+    vm.expectRevert(MyriadCTFExchange.OrderInvalidated.selector);
     exchange.matchOrdersWithFees(makerOrder, makerSig, takerOrder, takerSig, fill1);
   }
 
@@ -495,7 +495,7 @@ contract PredictionMarketCLOBTest is Test {
     vm.startPrank(maker);
     exchange.cancelOrders(toCancel);
 
-    vm.expectRevert("already cancelled");
+    vm.expectRevert(MyriadCTFExchange.AlreadyCancelled.selector);
     exchange.cancelOrders(toCancel);
     vm.stopPrank();
   }
@@ -507,7 +507,7 @@ contract PredictionMarketCLOBTest is Test {
     toCancel[0] = order;
 
     vm.prank(taker);
-    vm.expectRevert("not trader");
+    vm.expectRevert(MyriadCTFExchange.NotTrader.selector);
     exchange.cancelOrders(toCancel);
   }
 
@@ -533,7 +533,7 @@ contract PredictionMarketCLOBTest is Test {
     bytes memory sig1 = _signOrder(order1, makerPk);
     bytes memory sig2 = _signOrder(order2, makerPk);
 
-    vm.expectRevert("self trade");
+    vm.expectRevert(MyriadCTFExchange.SelfTrade.selector);
     exchange.matchOrdersWithFees(order1, sig1, order2, sig2, amount);
   }
 
@@ -572,7 +572,7 @@ contract PredictionMarketCLOBTest is Test {
 
     vm.warp(block.timestamp + 2);
 
-    vm.expectRevert("expired");
+    vm.expectRevert(MyriadCTFExchange.OrderExpired.selector);
     exchange.matchOrdersWithFees(makerOrder, makerSig, takerOrder, takerSig, amount);
   }
 
@@ -603,7 +603,7 @@ contract PredictionMarketCLOBTest is Test {
     bytes memory makerSig = _signOrder(makerOrder, makerPk);
     bytes memory takerSig = _signOrder(takerOrder, takerPk);
 
-    vm.expectRevert("notional 0");
+    vm.expectRevert(MyriadCTFExchange.ZeroNotional.selector);
     exchange.matchOrdersWithFees(makerOrder, makerSig, takerOrder, takerSig, 1);
   }
 
@@ -708,7 +708,7 @@ contract PredictionMarketCLOBTest is Test {
     bytes memory makerSig = _signOrder(makerOrder, makerPk);
     bytes memory takerSig = _signOrder(takerOrder, takerPk);
 
-    vm.expectRevert("market not tradeable");
+    vm.expectRevert(MyriadCTFExchange.MarketNotTradeable.selector);
     exchange.matchOrdersWithFees(makerOrder, makerSig, takerOrder, takerSig, amount);
   }
 
@@ -737,7 +737,7 @@ contract PredictionMarketCLOBTest is Test {
     bytes memory makerSig = _signOrder(makerOrder, makerPk);
     bytes memory takerSig = _signOrder(takerOrder, takerPk);
 
-    vm.expectRevert("market not tradeable");
+    vm.expectRevert(MyriadCTFExchange.MarketNotTradeable.selector);
     exchange.matchOrdersWithFees(makerOrder, makerSig, takerOrder, takerSig, amount);
   }
 
@@ -986,7 +986,7 @@ contract PredictionMarketCLOBTest is Test {
     bytes memory makerSig = _signOrder(makerOrder, makerPk);
     bytes memory takerSig = _signOrder(takerOrder, takerPk);
 
-    vm.expectRevert("fill 0");
+    vm.expectRevert(MyriadCTFExchange.ZeroFill.selector);
     exchange.matchOrdersWithFees(makerOrder, makerSig, takerOrder, takerSig, 0);
   }
 
@@ -1044,7 +1044,7 @@ contract PredictionMarketCLOBTest is Test {
     bytes memory makerSig = _signOrder(makerOrder, makerPk);
     bytes memory takerSig = _signOrder(takerOrder, takerPk);
 
-    vm.expectRevert("market not tradeable");
+    vm.expectRevert(MyriadCTFExchange.MarketNotTradeable.selector);
     exchange.matchOrdersWithFees(makerOrder, makerSig, takerOrder, takerSig, amount);
 
     manager.pauseMarket(marketId, false);
@@ -1393,7 +1393,7 @@ contract PredictionMarketCLOBTest is Test {
     bytes memory makerSig = _signOrder(makerOrder, makerPk);
     bytes memory takerSig = _signOrder(takerOrder, takerPk);
 
-    vm.expectRevert("below maker min fill");
+    vm.expectRevert(MyriadCTFExchange.BelowMakerMinFill.selector);
     exchange.matchOrdersWithFees(makerOrder, makerSig, takerOrder, takerSig, 49 ether);
 
     exchange.matchOrdersWithFees(makerOrder, makerSig, takerOrder, takerSig, 50 ether);
@@ -1426,7 +1426,7 @@ contract PredictionMarketCLOBTest is Test {
     bytes memory makerSig = _signOrder(makerOrder, makerPk);
     bytes memory takerSig = _signOrder(takerOrder, takerPk);
 
-    vm.expectRevert("below taker min fill");
+    vm.expectRevert(MyriadCTFExchange.BelowTakerMinFill.selector);
     exchange.matchOrdersWithFees(makerOrder, makerSig, takerOrder, takerSig, 29 ether);
 
     exchange.matchOrdersWithFees(makerOrder, makerSig, takerOrder, takerSig, 30 ether);
@@ -1525,7 +1525,7 @@ contract PredictionMarketCLOBTest is Test {
 
   function testPauseNotAdminReverts() public {
     vm.prank(maker);
-    vm.expectRevert("not admin");
+    vm.expectRevert(MyriadCTFExchange.NotAdmin.selector);
     exchange.pause();
   }
 
@@ -1533,7 +1533,7 @@ contract PredictionMarketCLOBTest is Test {
     exchange.pause();
 
     vm.prank(maker);
-    vm.expectRevert("not admin");
+    vm.expectRevert(MyriadCTFExchange.NotAdmin.selector);
     exchange.unpause();
   }
 
@@ -1570,12 +1570,12 @@ contract PredictionMarketCLOBTest is Test {
 
   function testSetCallbackGasLimitNotAdminReverts() public {
     vm.prank(taker);
-    vm.expectRevert("not admin");
+    vm.expectRevert(MyriadCTFExchange.NotAdmin.selector);
     exchange.setCallbackGasLimit(200_000);
   }
 
   function testSetCallbackGasLimitTooLowReverts() public {
-    vm.expectRevert("limit too low");
+    vm.expectRevert(MyriadCTFExchange.LimitTooLow.selector);
     exchange.setCallbackGasLimit(49_999);
   }
 
@@ -1824,7 +1824,7 @@ contract PredictionMarketCLOBTest is Test {
     fills[1] = 100 ether;
     bytes memory takerSig = _signOrder(t, takerPk);
 
-    vm.expectRevert("taker overfill");
+    vm.expectRevert(MyriadCTFExchange.TakerOverfill.selector);
     exchange.matchMultipleOrdersWithFees(makers, makerSigs, fills, t, takerSig);
   }
 
@@ -1854,7 +1854,7 @@ contract PredictionMarketCLOBTest is Test {
     fills[0] = 60 ether;
     bytes memory takerSig = _signOrder(t, takerPk);
 
-    vm.expectRevert("maker overfill");
+    vm.expectRevert(MyriadCTFExchange.MakerOverfill.selector);
     exchange.matchMultipleOrdersWithFees(makers, makerSigs, fills, t, takerSig);
   }
 
@@ -1867,7 +1867,7 @@ contract PredictionMarketCLOBTest is Test {
     uint256[] memory fills = new uint256[](0);
     bytes memory takerSig = _signOrder(t, takerPk);
 
-    vm.expectRevert("no makers");
+    vm.expectRevert(MyriadCTFExchange.NoMakers.selector);
     exchange.matchMultipleOrdersWithFees(makers, makerSigs, fills, t, takerSig);
   }
 
@@ -1885,7 +1885,7 @@ contract PredictionMarketCLOBTest is Test {
     fills[1] = 50 ether;
     bytes memory takerSig = _signOrder(t, takerPk);
 
-    vm.expectRevert("fill count");
+    vm.expectRevert(MyriadCTFExchange.FillCount.selector);
     exchange.matchMultipleOrdersWithFees(makers, makerSigs, fills, t, takerSig);
   }
 
@@ -1913,7 +1913,7 @@ contract PredictionMarketCLOBTest is Test {
     fills[0] = 100 ether;
     bytes memory takerSig = _signOrder(t, makerPk);
 
-    vm.expectRevert("self trade");
+    vm.expectRevert(MyriadCTFExchange.SelfTrade.selector);
     exchange.matchMultipleOrdersWithFees(makers, makerSigs, fills, t, takerSig);
   }
 
@@ -1940,7 +1940,7 @@ contract PredictionMarketCLOBTest is Test {
     fills[0] = 100 ether;
     bytes memory takerSig = _signOrder(t, takerPk);
 
-    vm.expectRevert("market mismatch");
+    vm.expectRevert(MyriadCTFExchange.MarketMismatch.selector);
     exchange.matchMultipleOrdersWithFees(makers, makerSigs, fills, t, takerSig);
   }
 
@@ -1970,7 +1970,7 @@ contract PredictionMarketCLOBTest is Test {
     fills[0] = 50 ether;
     bytes memory takerSig = _signOrder(t, takerPk);
 
-    vm.expectRevert("below taker min fill");
+    vm.expectRevert(MyriadCTFExchange.BelowTakerMinFill.selector);
     exchange.matchMultipleOrdersWithFees(makers, makerSigs, fills, t, takerSig);
   }
 
@@ -2076,7 +2076,7 @@ contract PredictionMarketCLOBTest is Test {
     bytes memory takerSig = _signOrder(t, takerPk);
 
     vm.prank(taker);
-    vm.expectRevert("not operator");
+    vm.expectRevert(MyriadCTFExchange.NotOperator.selector);
     exchange.matchMultipleOrdersWithFees(makers, makerSigs, fills, t, takerSig);
   }
 
@@ -2159,7 +2159,7 @@ contract PredictionMarketCLOBTest is Test {
     fills[0] = 60 ether;
     bytes memory takerSig = _signOrder(t, takerPk);
 
-    vm.expectRevert("maker dust remainder");
+    vm.expectRevert(MyriadCTFExchange.MakerDustRemainder.selector);
     exchange.matchMultipleOrdersWithFees(makers, makerSigs, fills, t, takerSig);
   }
 
@@ -2200,7 +2200,7 @@ contract PredictionMarketCLOBTest is Test {
     fills[1] = 30 ether;
     bytes memory takerSig = _signOrder(t, takerPk);
 
-    vm.expectRevert("taker dust remainder");
+    vm.expectRevert(MyriadCTFExchange.TakerDustRemainder.selector);
     exchange.matchMultipleOrdersWithFees(makers, makerSigs, fills, t, takerSig);
   }
 
@@ -2275,7 +2275,7 @@ contract PredictionMarketCLOBTest is Test {
     fills[0] = amount;
     bytes memory takerSig = _signOrder(t, takerPk);
 
-    vm.expectRevert("insufficient collateral");
+    vm.expectRevert(MyriadCTFExchange.InsufficientCollateral.selector);
     exchange.matchMultipleOrdersWithFees(makers, makerSigs, fills, t, takerSig);
   }
 
@@ -2299,7 +2299,7 @@ contract PredictionMarketCLOBTest is Test {
     fills[0] = amount;
     bytes memory takerSig = _signOrder(t, takerPk);
 
-    vm.expectRevert("insufficient tokens");
+    vm.expectRevert(MyriadCTFExchange.InsufficientTokens.selector);
     exchange.matchMultipleOrdersWithFees(makers, makerSigs, fills, t, takerSig);
   }
 
@@ -2339,7 +2339,7 @@ contract PredictionMarketCLOBTest is Test {
     bytes32 m1Hash = exchange.hashOrder(m1);
     bytes32 m2Hash = exchange.hashOrder(m2);
 
-    vm.expectRevert("taker overfill");
+    vm.expectRevert(MyriadCTFExchange.TakerOverfill.selector);
     exchange.matchMultipleOrdersWithFees(makers, makerSigs, fills, t, tSig);
 
     assertEq(exchange.filledAmounts(tHash), 0, "taker fill rolled back");
@@ -2380,7 +2380,7 @@ contract PredictionMarketCLOBTest is Test {
     bytes32 m1Hash = exchange.hashOrder(m1);
     bytes32 m2Hash = exchange.hashOrder(m2);
 
-    vm.expectRevert("taker dust remainder");
+    vm.expectRevert(MyriadCTFExchange.TakerDustRemainder.selector);
     exchange.matchMultipleOrdersWithFees(makers, makerSigs, fills, t, tSig);
 
     assertEq(exchange.filledAmounts(tHash), 0, "taker fill rolled back on dust");
@@ -2420,7 +2420,7 @@ contract PredictionMarketCLOBTest is Test {
     bytes32 tHash = exchange.hashOrder(t);
     bytes32 m1Hash = exchange.hashOrder(m1);
 
-    vm.expectRevert("insufficient tokens");
+    vm.expectRevert(MyriadCTFExchange.InsufficientTokens.selector);
     exchange.matchMultipleOrdersWithFees(makers, makerSigs, fills, t, tSig);
 
     assertEq(exchange.filledAmounts(tHash), 0, "taker fill rolled back");
@@ -2462,7 +2462,7 @@ contract PredictionMarketCLOBTest is Test {
     uint256[] memory fills = new uint256[](1);
     fills[0] = 50 ether;
 
-    vm.expectRevert("taker overfill");
+    vm.expectRevert(MyriadCTFExchange.TakerOverfill.selector);
     exchange.matchMultipleOrdersWithFees(makers, makerSigs, fills, t, tSig);
 
     assertEq(exchange.filledAmounts(tHash), 60 ether, "taker fill unchanged after batch revert");
@@ -2494,7 +2494,7 @@ contract PredictionMarketCLOBTest is Test {
     bytes memory mSig = _signOrder(m, makerPk);
     bytes memory tSig = _signOrder(t, takerPk);
 
-    vm.expectRevert("insufficient collateral");
+    vm.expectRevert(MyriadCTFExchange.InsufficientCollateral.selector);
     exchange.matchOrdersWithFees(m, mSig, t, tSig, amount);
   }
 
@@ -2514,7 +2514,7 @@ contract PredictionMarketCLOBTest is Test {
     bytes memory mSig = _signOrder(m, makerPk);
     bytes memory tSig = _signOrder(t, takerPk);
 
-    vm.expectRevert("insufficient tokens");
+    vm.expectRevert(MyriadCTFExchange.InsufficientTokens.selector);
     exchange.matchOrdersWithFees(m, mSig, t, tSig, amount);
   }
 
@@ -2538,7 +2538,7 @@ contract PredictionMarketCLOBTest is Test {
     bytes memory mSig = _signOrder(m, makerPk);
     bytes memory tSig = _signOrder(t, takerPk);
 
-    vm.expectRevert("insufficient allowance");
+    vm.expectRevert(MyriadCTFExchange.InsufficientAllowance.selector);
     exchange.matchOrdersWithFees(m, mSig, t, tSig, amount);
   }
 
@@ -2560,7 +2560,7 @@ contract PredictionMarketCLOBTest is Test {
     bytes memory mSig = _signOrder(m, makerPk);
     bytes memory tSig = _signOrder(t, takerPk);
 
-    vm.expectRevert("insufficient collateral");
+    vm.expectRevert(MyriadCTFExchange.InsufficientCollateral.selector);
     exchange.matchOrdersWithFees(m, mSig, t, tSig, amount);
   }
 
@@ -2584,7 +2584,7 @@ contract PredictionMarketCLOBTest is Test {
     bytes memory mSig = _signOrder(m, makerPk);
     bytes memory tSig = _signOrder(t, takerPk);
 
-    vm.expectRevert("insufficient tokens");
+    vm.expectRevert(MyriadCTFExchange.InsufficientTokens.selector);
     exchange.matchOrdersWithFees(m, mSig, t, tSig, amount);
   }
 
@@ -2609,7 +2609,7 @@ contract PredictionMarketCLOBTest is Test {
     bytes memory mSig = _signOrder(m, makerPk);
     bytes memory tSig = _signOrder(t, takerPk);
 
-    vm.expectRevert("tokens not approved");
+    vm.expectRevert(MyriadCTFExchange.TokensNotApproved.selector);
     exchange.matchOrdersWithFees(m, mSig, t, tSig, amount);
   }
 
@@ -2632,7 +2632,7 @@ contract PredictionMarketCLOBTest is Test {
 
   function testSetMinOrderAmountNotAdminReverts() public {
     vm.prank(taker);
-    vm.expectRevert("not admin");
+    vm.expectRevert(MyriadCTFExchange.NotAdmin.selector);
     exchange.setMinOrderAmount(1 ether);
   }
 
@@ -2659,7 +2659,7 @@ contract PredictionMarketCLOBTest is Test {
     bytes memory mSig = _signOrder(m, makerPk);
     bytes memory tSig = _signOrder(t, takerPk);
 
-    vm.expectRevert("below min amount");
+    vm.expectRevert(MyriadCTFExchange.BelowMinAmount.selector);
     exchange.matchOrdersWithFees(m, mSig, t, tSig, 5 ether);
   }
 
@@ -2701,7 +2701,7 @@ contract PredictionMarketCLOBTest is Test {
     bytes memory mSig_ = _signOrder(m, makerPk);
     bytes memory tSig_ = _signOrder(t, takerPk);
 
-    vm.expectRevert("maker dust remainder");
+    vm.expectRevert(MyriadCTFExchange.MakerDustRemainder.selector);
     exchange.matchOrdersWithFees(m, mSig_, t, tSig_, 20 ether);
   }
 
@@ -2723,7 +2723,7 @@ contract PredictionMarketCLOBTest is Test {
     bytes memory mSig_ = _signOrder(m, makerPk);
     bytes memory tSig_ = _signOrder(t, takerPk);
 
-    vm.expectRevert("taker dust remainder");
+    vm.expectRevert(MyriadCTFExchange.TakerDustRemainder.selector);
     exchange.matchOrdersWithFees(m, mSig_, t, tSig_, 20 ether);
   }
 
@@ -2820,7 +2820,7 @@ contract PredictionMarketCLOBTest is Test {
     uint256 makerTokensBefore = conditionalTokens.balanceOf(maker, yesTokenId);
     uint256 takerColBefore = collateral.balanceOf(taker);
 
-    vm.expectRevert("taker dust remainder");
+    vm.expectRevert(MyriadCTFExchange.TakerDustRemainder.selector);
     exchange.matchOrdersWithFees(m, mSig, t, tSig, 60 ether);
 
     assertEq(conditionalTokens.balanceOf(maker, yesTokenId), makerTokensBefore, "maker tokens unchanged");
@@ -2854,7 +2854,7 @@ contract PredictionMarketCLOBTest is Test {
 
     uint256 makerColBefore = collateral.balanceOf(maker);
 
-    vm.expectRevert("taker overfill");
+    vm.expectRevert(MyriadCTFExchange.TakerOverfill.selector);
     exchange.matchOrdersWithFees(m1, m1Sig, t1, t1Sig, 10 ether);
 
     assertEq(collateral.balanceOf(maker), makerColBefore, "maker collateral unchanged after revert");
@@ -2876,7 +2876,7 @@ contract PredictionMarketCLOBTest is Test {
     bytes32 mHash = exchange.hashOrder(m);
     bytes32 tHash = exchange.hashOrder(t);
 
-    vm.expectRevert("insufficient tokens");
+    vm.expectRevert(MyriadCTFExchange.InsufficientTokens.selector);
     exchange.matchOrdersWithFees(m, mSig, t, tSig, 50 ether);
 
     assertEq(exchange.filledAmounts(tHash), 0, "taker fill rolled back");
