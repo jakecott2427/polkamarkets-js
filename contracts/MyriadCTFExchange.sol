@@ -164,7 +164,6 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
   error SideMismatch();
   error PriceMismatch();
   error SameOutcome();
-  error PriceSumNotOne();
   error MakerFeesExceedProceeds();
   error TakerFeesExceedProceeds();
   error InsufficientCollateral();
@@ -735,7 +734,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
     _requireMarketOpen(maker.marketId);
 
     (Order calldata outcome0Order, Order calldata outcome1Order) = maker.outcomeId == Outcomes.YES ? (maker, taker) : (taker, maker);
-    if (outcome0Order.price + outcome1Order.price != ONE) revert PriceSumNotOne();
+    if (outcome0Order.price + outcome1Order.price < ONE) revert PriceSumBelowOne();
 
     IERC20 collateral = manager.getMarketCollateral(maker.marketId);
 
@@ -785,7 +784,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
     _requireMarketOpen(maker.marketId);
 
     (Order calldata outcome0Order, Order calldata outcome1Order) = maker.outcomeId == Outcomes.YES ? (maker, taker) : (taker, maker);
-    if (outcome0Order.price + outcome1Order.price != ONE) revert PriceSumNotOne();
+    if (outcome0Order.price + outcome1Order.price > ONE) revert PriceAboveOne();
 
     ConditionalTokens _ct = conditionalTokens;
     uint256 outcome0TokenId = _ct.getTokenId(maker.marketId, Outcomes.YES);

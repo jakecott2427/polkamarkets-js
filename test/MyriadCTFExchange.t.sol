@@ -637,7 +637,7 @@ contract MyriadCTFExchangeTest is Test {
     exchange.matchOrdersWithFees(buyOrder, buySig, sellOrder, sellSig, amount);
   }
 
-  function testMintMatchPriceSumNotOneReverts() public {
+  function testMintMatchPriceSumBelowOneReverts() public {
     uint256 amount = 100 ether;
     // prices sum to 0.9 instead of 1.0
     uint256 outcome0Price = (50 * ONE) / 100;
@@ -654,14 +654,14 @@ contract MyriadCTFExchangeTest is Test {
     bytes memory mSig = _signOrder(m, makerPk);
     bytes memory tSig = _signOrder(t, takerPk);
 
-    vm.expectRevert(MyriadCTFExchange.PriceSumNotOne.selector);
+    vm.expectRevert(MyriadCTFExchange.PriceSumBelowOne.selector);
     exchange.matchOrdersWithFees(m, mSig, t, tSig, amount);
   }
 
-  function testMergeMatchPriceSumNotOneReverts() public {
+  function testMergeMatchPriceSumAboveOneReverts() public {
     uint256 amount = 100 ether;
     uint256 outcome0Price = (50 * ONE) / 100;
-    uint256 outcome1Price = (40 * ONE) / 100; // sum = 0.9, not 1.0
+    uint256 outcome1Price = (60 * ONE) / 100; // sum = 1.1, not 1.0
 
     collateral.mint(maker, 1000 ether);
     collateral.mint(taker, 1000 ether);
@@ -679,7 +679,7 @@ contract MyriadCTFExchangeTest is Test {
     bytes memory mSig = _signOrder(m, makerPk);
     bytes memory tSig = _signOrder(t, takerPk);
 
-    vm.expectRevert(MyriadCTFExchange.PriceSumNotOne.selector);
+    vm.expectRevert(MyriadCTFExchange.PriceAboveOne.selector);
     exchange.matchOrdersWithFees(m, mSig, t, tSig, amount);
   }
 
