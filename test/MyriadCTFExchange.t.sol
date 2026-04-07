@@ -679,7 +679,7 @@ contract MyriadCTFExchangeTest is Test {
     bytes memory mSig = _signOrder(m, makerPk);
     bytes memory tSig = _signOrder(t, takerPk);
 
-    vm.expectRevert(MyriadCTFExchange.PriceAboveOne.selector);
+    vm.expectRevert(MyriadCTFExchange.PriceSumAboveOne.selector);
     exchange.matchOrdersWithFees(m, mSig, t, tSig, amount);
   }
 
