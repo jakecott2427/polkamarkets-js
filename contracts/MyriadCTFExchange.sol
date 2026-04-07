@@ -273,7 +273,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
         _feeModule.getFeesAtPrice(maker.marketId, maker.price);
     } else {
       (feeConfig.makerFeeBps, ) = _feeModule.getFeesAtPrice(maker.marketId, maker.price);
-      (, feeConfig.takerFeeBps) = _feeModule.getFeesAtPrice(maker.marketId, taker.price);
+      (, feeConfig.takerFeeBps) = _feeModule.getFeesAtPrice(maker.marketId, ONE - maker.price);
     }
 
     (uint256 makerFee, uint256 takerFee) = _matchOrders(maker, makerSig, taker, takerSig, fillAmount, feeConfig);
@@ -322,7 +322,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
           _feeModule.getFeesAtPrice(makers[i].marketId, makers[i].price);
       } else {
         (feeConfig.makerFeeBps, ) = _feeModule.getFeesAtPrice(makers[i].marketId, makers[i].price);
-        (, feeConfig.takerFeeBps) = _feeModule.getFeesAtPrice(makers[i].marketId, taker.price);
+        (, feeConfig.takerFeeBps) = _feeModule.getFeesAtPrice(makers[i].marketId, ONE - makers[i].price);
       }
 
       totalTakerFill += fillAmounts[i];
