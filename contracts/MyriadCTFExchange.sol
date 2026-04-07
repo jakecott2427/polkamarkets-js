@@ -806,14 +806,20 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
     uint256 outcome1Notional = maker.outcomeId == Outcomes.YES ? takerNotional : makerNotional;
     if (outcome0Notional == 0 || outcome1Notional == 0) revert ZeroNotional();
 
-    (makerFee, takerFee) = _paySellerWithFees(maker, taker, fillAmount, feeConfig, collateral, outcome0Order, outcome1Order, outcome0Notional, outcome1Notional);
+    (makerFee, takerFee) = _paySellerWithFees(
+      maker,
+      feeConfig,
+      collateral,
+      outcome0Order,
+      outcome1Order,
+      outcome0Notional,
+      outcome1Notional
+    );
   }
 
   /// @dev Fee deduction for merge matches — each seller's fee is deducted from their proceeds.
   function _paySellerWithFees(
     Order calldata maker,
-    Order calldata taker,
-    uint256 fillAmount,
     FeeConfig memory feeConfig,
     IERC20 collateral,
     Order calldata outcome0Order,
