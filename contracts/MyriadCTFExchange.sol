@@ -818,14 +818,15 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
     uint256 outcome0Notional,
     uint256 outcome1Notional
   ) internal returns (uint256 makerFee, uint256 takerFee) {
-    uint256 makerNotional = (fillAmount * maker.price) / ONE;
-    uint256 takerNotional = fillAmount - makerNotional;
+    address makerTrader = maker.trader;
+
+    uint256 makerNotional = makerTrader == outcome0Order.trader ? outcome0Notional : outcome1Notional;
+    uint256 takerNotional = makerTrader == outcome0Order.trader ? outcome1Notional : outcome0Notional;
 
     makerFee = (makerNotional * feeConfig.makerFeeBps) / BPS;
     takerFee = (takerNotional * feeConfig.takerFeeBps) / BPS;
     uint256 totalProtocolFees = makerFee + takerFee;
 
-    address makerTrader = maker.trader;
     address takerTrader = taker.trader;
 
     uint256 makerProceeds = makerTrader == outcome0Order.trader ? outcome0Notional : outcome1Notional;
