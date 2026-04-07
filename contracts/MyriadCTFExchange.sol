@@ -799,8 +799,10 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
 
     IERC20 collateral = manager.getMarketCollateral(maker.marketId);
 
-    uint256 outcome0Notional = (fillAmount * outcome0Order.price) / ONE;
-    uint256 outcome1Notional = fillAmount - outcome0Notional;
+    uint256 makerNotional = (fillAmount * maker.price) / ONE;
+    uint256 takerNotional = fillAmount - makerNotional;
+    uint256 outcome0Notional = maker.outcomeId == Outcomes.YES ? makerNotional : takerNotional;
+    uint256 outcome1Notional = maker.outcomeId == Outcomes.YES ? takerNotional : makerNotional;
     if (outcome0Notional == 0 || outcome1Notional == 0) revert ZeroNotional();
 
     (makerFee, takerFee) = _paySellerWithFees(maker, taker, fillAmount, feeConfig, collateral, outcome0Order, outcome1Order, outcome0Notional, outcome1Notional);
@@ -818,18 +820,17 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
     uint256 outcome0Notional,
     uint256 outcome1Notional
   ) internal returns (uint256 makerFee, uint256 takerFee) {
-    uint256 makerNotional = (fillAmount * maker.price) / ONE;
-    uint256 takerNotional = fillAmount - makerNotional;
+    bool makerIsOutcome0 = maker.outcomeId == Outcomes.YES;
+
+    uint256 makerNotional = makerIsOutcome0 ? outcome0Notional : outcome1Notional;
+    uint256 takerNotional = makerIsOutcome0 ? outcome1Notional : outcome0Notional;
 
     makerFee = (makerNotional * feeConfig.makerFeeBps) / BPS;
     takerFee = (takerNotional * feeConfig.takerFeeBps) / BPS;
     uint256 totalProtocolFees = makerFee + takerFee;
 
-    address makerTrader = maker.trader;
-    address takerTrader = taker.trader;
-
-    uint256 makerProceeds = makerTrader == outcome0Order.trader ? outcome0Notional : outcome1Notional;
-    uint256 takerProceeds = takerTrader == outcome0Order.trader ? outcome0Notional : outcome1Notional;
+    uint256 makerProceeds = makerNotional;
+    uint256 takerProceeds = takerNotional;
 
     if (makerProceeds < makerFee) revert MakerFeesExceedProceeds();
     makerProceeds -= makerFee;
@@ -837,8 +838,8 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
     if (takerProceeds < takerFee) revert TakerFeesExceedProceeds();
     takerProceeds -= takerFee;
 
-    collateral.safeTransfer(outcome0Order.trader, makerTrader == outcome0Order.trader ? makerProceeds : takerProceeds);
-    collateral.safeTransfer(outcome1Order.trader, makerTrader == outcome1Order.trader ? makerProceeds : takerProceeds);
+    collateral.safeTransfer(outcome0Order.trader, makerIsOutcome0 ? makerProceeds : takerProceeds);
+    collateral.safeTransfer(outcome1Order.trader, makerIsOutcome0 ? takerProceeds : makerProceeds);
 
     if (totalProtocolFees > 0) {
       collateral.safeTransfer(feeModule, totalProtocolFees);
