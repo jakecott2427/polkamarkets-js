@@ -799,8 +799,10 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
 
     IERC20 collateral = manager.getMarketCollateral(maker.marketId);
 
-    uint256 outcome0Notional = (fillAmount * outcome0Order.price) / ONE;
-    uint256 outcome1Notional = fillAmount - outcome0Notional;
+    uint256 makerNotional = (fillAmount * maker.price) / ONE;
+    uint256 takerNotional = fillAmount - makerNotional;
+    uint256 outcome0Notional = maker.outcomeId == Outcomes.YES ? makerNotional : takerNotional;
+    uint256 outcome1Notional = maker.outcomeId == Outcomes.YES ? takerNotional : makerNotional;
     if (outcome0Notional == 0 || outcome1Notional == 0) revert ZeroNotional();
 
     (makerFee, takerFee) = _paySellerWithFees(maker, taker, fillAmount, feeConfig, collateral, outcome0Order, outcome1Order, outcome0Notional, outcome1Notional);
