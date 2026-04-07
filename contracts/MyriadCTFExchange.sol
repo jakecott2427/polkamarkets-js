@@ -143,6 +143,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
   error BelowMinFill();
   error DuplicateMarket();
   error PriceSumBelowOne();
+  error PriceSumAboveOne();
   error ZeroNotional();
   error DustRemainder();
   error SelfTrade();
@@ -784,7 +785,7 @@ contract MyriadCTFExchange is Initializable, ReentrancyGuardTransientUpgradeable
     _requireMarketOpen(maker.marketId);
 
     (Order calldata outcome0Order, Order calldata outcome1Order) = maker.outcomeId == Outcomes.YES ? (maker, taker) : (taker, maker);
-    if (outcome0Order.price + outcome1Order.price > ONE) revert PriceAboveOne();
+    if (outcome0Order.price + outcome1Order.price > ONE) revert PriceSumAboveOne();
 
     ConditionalTokens _ct = conditionalTokens;
     uint256 outcome0TokenId = _ct.getTokenId(maker.marketId, Outcomes.YES);
