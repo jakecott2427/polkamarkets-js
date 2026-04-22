@@ -427,7 +427,7 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     sigs[1] = _signOrder(orders[1], bobPk);
     sigs[2] = _signOrder(orders[2], charliePk);
 
-    vm.expectRevert("price sum < 1");
+    vm.expectRevert(MyriadCTFExchange.PriceSumBelowOne.selector);
     exchange.matchCrossMarketOrders(orders, sigs, 10 ether);
   }
 
@@ -825,7 +825,7 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     sigs[1] = _signOrder(orders[1], bobPk);
     sigs[2] = _signOrder(orders[2], charliePk);
 
-    vm.expectRevert("insufficient collateral");
+    vm.expectRevert(MyriadCTFExchange.InsufficientCollateral.selector);
     exchange.matchCrossMarketOrders(orders, sigs, 100 ether);
   }
 
@@ -861,7 +861,7 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     sigs[1] = _signOrder(orders[1], bobPk);
     sigs[2] = _signOrder(orders[2], charliePk);
 
-    vm.expectRevert("insufficient allowance");
+    vm.expectRevert(MyriadCTFExchange.InsufficientAllowance.selector);
     exchange.matchCrossMarketOrders(orders, sigs, 100 ether);
   }
 
@@ -889,7 +889,7 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     sigs[1] = _signOrder(orders[1], bobPk);
     sigs[2] = _signOrder(orders[2], charliePk);
 
-    vm.expectRevert("below min amount");
+    vm.expectRevert(MyriadCTFExchange.BelowMinAmount.selector);
     exchange.matchCrossMarketOrders(orders, sigs, 5 ether);
   }
 
@@ -926,7 +926,7 @@ contract NegRiskAdapterTest is Test, ERC1155Holder {
     sigs[1] = _signOrder(orders[1], bobPk);
     sigs[2] = _signOrder(orders[2], charliePk);
 
-    vm.expectRevert("dust remainder");
+    vm.expectRevert(MyriadCTFExchange.DustRemainder.selector);
     exchange.matchCrossMarketOrders(orders, sigs, 20 ether);
   }
 
