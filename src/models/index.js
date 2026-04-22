@@ -14,6 +14,11 @@ const FantasyERC20Contract = require('./FantasyERC20Contract');
 const WETH9Contract = require('./WETH9Contract');
 const ArbitrationContract = require('./ArbitrationContract');
 const ArbitrationProxyContract = require('./ArbitrationProxyContract');
+const AdminRegistryContract = require('./AdminRegistryContract');
+const PredictionMarketV3ManagerCLOBContract = require('./PredictionMarketV3ManagerCLOBContract');
+const ConditionalTokensContract = require('./ConditionalTokensContract');
+const MyriadCTFExchangeContract = require('./MyriadCTFExchangeContract');
+const FeeModuleContract = require('./FeeModuleContract');
 const MerkleRewardsDistributorContract = require('./MerkleRewardsDistributorContract');
 const Multicall3Contract = require('./Multicall3Contract');
 
@@ -34,6 +39,11 @@ module.exports = {
   ArbitrationProxyContract,
   PredictionMarketV3FactoryContract,
   PredictionMarketV3ControllerContract,
+  AdminRegistryContract,
+  PredictionMarketV3ManagerCLOBContract,
+  ConditionalTokensContract,
+  MyriadCTFExchangeContract,
+  FeeModuleContract,
   MerkleRewardsDistributorContract,
   Multicall3Contract
 }
